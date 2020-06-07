@@ -149,26 +149,52 @@ idea
 -
 """
 
+
+
 #pull saved data
 df_races2 = pd.read_csv(RACES_FILENAME)
 df_races2 = df_races2.drop(['Unnamed: 0'], axis = 1) 
 
-#clean up data
+#create column lists for subsequent melting (aka pivoting from wide to long df)
 time_cols = ['Swim','T1','Bike','T2','Run','Finish']
-df_races2.loc[:,time_cols] = df_races2.loc[:,time_cols].replace('00:00',np.NaN)
-dnf_list = (df_races2.Place=='0') | (df_races2.Place=='DNF')
-df_races2.loc[dnf_list,'Place'] = np.NaN
-df_races2['Place'] = pd.to_numeric(df_races2['Place'])
+all_cols = df_races2.columns.tolist()
+
+# define race legs and aggregate legs
+dict_legs = { 
+    'Swim' : { 'Legs':['Swim'] , 'PCT_FR_MED_HI': 2 , 'PCT_FR_MED_LO': -.3,'Time_col':True } 
+    ,'T1': { 'Legs':['T1'] , 'PCT_FR_MED_HI': 4 , 'PCT_FR_MED_LO': -.3, 'Time_col':True} 
+    ,'Bike': { 'Legs':['Bike'] , 'PCT_FR_MED_HI': 2, 'PCT_FR_MED_LO': -.3,'Time_col':True } 
+    ,'T2': { 'Legs':['T2'] , 'PCT_FR_MED_HI': 4, 'PCT_FR_MED_LO': -.3, 'Time_col':True } 
+    ,'Run': { 'Legs':['Run'] , 'PCT_FR_MED_HI': 2, 'PCT_FR_MED_LO': -.3, 'Time_col':True } 
+    ,'Finish': { 'Legs':['Swim','T1','Bike','T2','Run']  , 'PCT_FR_MED_HI': 2,'PCT_FR_MED_LO': -.3,'Time_col':True } 
+    ,'Bike_Out': { 'Legs':['Swim','T1'] , 'PCT_FR_MED_HI': 2,'PCT_FR_MED_LO': -.3, 'Time_col':False } 
+    , 'Bike_In': { 'Legs':['Swim','T1','Bike'] , 'PCT_FR_MED_HI': 2 ,'PCT_FR_MED_LO': -.3,'Time_col':False} 
+    , 'Run_Out': { 'Legs':['Swim','T1','Bike','T2']  , 'PCT_FR_MED_HI': 2 ,'PCT_FR_MED_LO': -.3,'Time_col':False} 
+    }
+
+#melt data frame to have all values in one column, making calcs easier
+# this makes the grain Date, Race, Person, Sport level
+# Overall place field is being kept as an attribute across all Race Legs (not just finish) intentionally for later analysis
+df = df_races2.melt(id_vars=[x for x in all_cols if x not in time_cols],value_vars=time_cols,value_name='Time')
+df = df.rename(columns={'variable':'Race_Leg'})
+
+
+#fix erroneous values
+df.loc[:,'Time'] = df.loc[:,'Time'].replace('00:00',np.NaN)
+
+# fix DNFs (at least partially)
+dnf_list = ( (df.Place=='0') | (df.Place=='DNF') )
+df.loc[dnf_list,'Place'] = np.NaN
+df['Place'] = pd.to_numeric(df['Place'])
 
 #clean up times, convert to seconds
-bike_clean_rows = (df_races2.loc[:,'Bike'].str.count(':')==2) & (df_races2.loc[:,'Bike'].str.slice(stop=2) != '01')
-df_races2.loc[ bike_clean_rows==True,'Bike'] = df_races2.loc[ bike_clean_rows==True,'Bike'].str.slice(stop=5)
-T2_clean_rows = (df_races2.loc[:,'T2'].str.count(':')==2) & (df_races2.loc[:,'T2'].str.slice(stop=2) != '01')
-df_races2.loc[ T2_clean_rows==True,'T2'] = df_races2.loc[ T2_clean_rows==True,'T2'].str.slice(stop=5)
+bike_clean_rows = (df.Race_Leg=='Bike') & (df.Time.str.count(':')==2) & (df.Time.str.slice(stop=2) != '01')
+df.loc[ bike_clean_rows==True,'Time'] = df.loc[ bike_clean_rows==True,'Time'].str.slice(stop=5)
+T2_clean_rows = (df.Race_Leg=='T2') & (df.Time.str.count(':')==2) & (df.Time.str.slice(stop=2) != '01')
+df.loc[ T2_clean_rows==True,'Time'] = df.loc[ T2_clean_rows==True,'Time'].str.slice(stop=5)
 
 #add '00:' onto length 5
-for time_col in time_cols:
-    df_races2.loc[df_races2.loc[:,time_col].str.len()==5,time_col] = '00:'+df_races2.loc[df_races2.loc[:,time_col].str.len()==5,time_col]
+df.loc[df.Time.str.len()==5,'Time'] = '00:'+df.loc[df.Time.str.len()==5,'Time']
 
 def get_sec(time_str):
     if pd.isnull(time_str) == True:
@@ -179,153 +205,204 @@ def get_sec(time_str):
         result =  int(h) * 3600 + int(m) * 60 + int(s)
     return result
 
-for time_col in time_cols:
-    df_races2.loc[:,time_col] = df_races2.loc[:,time_col].apply(get_sec)
+df.loc[:,'Time'] = df.Time.apply(get_sec)
 
-#calc bike out gap
-df_races2['Bike_Out'] = df_races2.Swim+df_races2.T1
-df_races2['Bike_Out_lag'] = (df_races2.sort_values(by=['Bike_Out'], ascending=True).groupby(['Race_Name','Division','Date'])['Bike_Out'].shift(1))
-df_races2['Bike_Out_gap'] = df_races2.Bike_Out-df_races2.Bike_Out_lag
+#create flag to indicate the "clean" race legs so that filtering discrete race legs easier after we union aggregate race legs
+df.loc[:,'Race_Leg_Flag'] = 1
 
-#calc bike in for Bobby mcgee template
-df_races2['Bike_In'] = df_races2.Swim+df_races2.T1+df_races2.Bike
-#df_races2['Bike_In_lag'] = (df_races2.sort_values(by=['Bike_Out'], ascending=True).groupby(['Race_Name','Division','Date'])['Bike_In'].shift(1))
-#df_races2['Bike_In_gap'] = df_races2.Bike_Out-df_races2.Bike_In_lag
+# list for grouping down to the person level
+list_gb_person = ['Name', 'Country', 'Racing Age', 'Place', 'Team', 'Race_Name', 'Division', 'Date', 'Location'] #everything but Time
 
-#calc run gap
-df_races2['Run_Out'] = df_races2.Swim+df_races2.T1+df_races2.Bike+df_races2.T2
-df_races2['Run_Out_lag'] = (df_races2.sort_values(by=['Run_Out'], ascending=True).groupby(['Race_Name','Division','Date'])['Run_Out'].shift(1))
-df_races2['Run_Out_gap'] = df_races2.Run_Out-df_races2.Run_Out_lag
+# list for grouping down to the race leg level
+list_gb_race_leg = ['Race_Name','Division','Date','Race_Leg']
 
-#calc number of athletes within plus minus 5 seconds of Bikeout runout
-sec_window = 5 
-def comp_time_ct(row=df_races2.iloc[764],measure='Bike_Out',df=df_races2,sec_window1=sec_window):
-    row=pd.DataFrame(row.values.reshape(1,len(row.values)),columns=row.index)
-    if row.loc[0,measure]==np.NaN:
-        result1 = np.NaN
-    else:
-        ind_time = row.loc[0,measure]
-        row_filtered = row[['Race_Name','Division','Date']]
-        grp_time = df.merge(row_filtered, on=['Race_Name','Division','Date'], how='inner')[measure]
-#        abs_diff = grp_time.subtract(ind_time)
-        abs_diff = grp_time.map(lambda x: abs(x-ind_time) )
-        result1 = sum(  (abs_diff<=sec_window1)*1 ,-1)
-    return result1
+
+df['Mean'] = df.groupby(list_gb_race_leg)['Time'].transform('mean')
+df['Median'] = df.groupby(list_gb_race_leg)['Time'].transform('median')
+df['Quantile_20'] = df.groupby(list_gb_race_leg)['Time'].transform('quantile',.2)
+df['Quantile_80'] = df.groupby(list_gb_race_leg)['Time'].transform('quantile',.8)
+df['Min'] = df.groupby(list_gb_race_leg)['Time'].transform('min')
+df['Max'] = df.groupby(list_gb_race_leg)['Time'].transform('max')
+df['Std'] = df.groupby(list_gb_race_leg)['Time'].transform('std')
+df['Var_From_Normal'] = abs(df.Time - df.Median)
+df['Var_From_Median_Pct'] = df.Time/df.Median-1
+df['Var_From_20_PCTLE_Pct'] = df.Time/df.Quantile_20-1
+df['Var_From_80_PCTLE_Pct'] = df.Time/df.Quantile_80-1
+df['PCT_FR_MED_HI'] = df.Race_Leg.apply(lambda x: dict_legs.get(x)['PCT_FR_MED_HI'])
+df['PCT_FR_MED_LO'] = df.Race_Leg.apply(lambda x: dict_legs.get(x)['PCT_FR_MED_LO'])
+df['Valid'] = (df.Var_From_80_PCTLE_Pct<df['PCT_FR_MED_HI']) & (df.Var_From_20_PCTLE_Pct>df['PCT_FR_MED_LO'] ) 
+
+df.groupby(['Valid']).count()
 
 
 
-grp_Swim_T1 = ['Race_Name','Division','Date','Name']
+df_aggs = df[0:0] #empty data frame shell for concat union
+for key in dict_legs.keys():
+    #check if the key is novel to the df eg if 'Swim' then skip
+    if key in df.Race_Leg.unique():
+        continue
+    list_legs = dict_legs.get(key).get('Legs')  
+    #how many legs we are summing
+    list_legs_len = len(list_legs)
+    
+    #sum both the legs and the valid indicator
+    df_loop = df.loc[df.Race_Leg.isin(list_legs),:].groupby(['Name', 'Race_Name', 'Division', 'Date']).agg( { 'Time': 'sum', 'Valid' : 'sum'} ).reset_index()
+    df_loop['Race_Leg'] =key
+    df_loop['Race_Legs_Summed'] = df_loop.Valid
+    df_loop['Valid_needed'] = list_legs_len
+    #valid indicator sum must match number of legs expected to be summed or the data is invalid
+    df_loop['Valid'] = (df_loop.Valid_needed==df_loop['Race_Legs_Summed'])
+    #add back in columns with NAs that had to be removed from groupby statement because pandas doesn't like NaNs in group by
+    df_loop=df_loop.merge(df[['Name', 'Race_Name', 'Division', 'Date']+['Country', 'Racing Age', 'Place', 'Team','Location']].drop_duplicates(), on =['Name', 'Race_Name', 'Division', 'Date'],how='left')
+    #join loop df to holding df
+    df_aggs = pd.concat([df_aggs,df_loop], ignore_index=True, axis=0,sort=False)
 
-df_races2['Bike_Out_w/in_'+str(sec_window)] = df_races2.apply(lambda row: comp_time_ct(row=row,measure='Bike_Out',df=df_races2,sec_window1=sec_window) ,axis=1) 
-df_races2['Run_Out_w/in_'+str(sec_window)] = df_races2.apply(lambda row: comp_time_ct(row=row,measure='Run_Out',df=df_races2,sec_window1=sec_window) ,axis=1) 
+#clean up columns needed for loop
+df_aggs.drop(columns=['Race_Legs_Summed','Valid_needed'],inplace=True)
+
+#union aggregate data fields to non-aggregate fields
+df = pd.concat([df,df_aggs], ignore_index=True, axis=0,sort=False).sort_values(by=['Race_Name','Division','Date','Name','Race_Leg'])
 
 
+#calc top 3 in each event and append on at the individual level
+df['Time_Rank'] = df[df.Valid==True].groupby(list_gb_race_leg, as_index=False)['Time'].rank(method='min')
+gb_rnk = df[df.Time_Rank<=3].groupby(list_gb_race_leg, as_index=False)['Time'].mean()
+df = df.merge(gb_rnk,how='left',left_on = list_gb_race_leg, right_on=list_gb_race_leg,suffixes=('', '_Top3'))
+
+#calc top 3 podium overall times for each race leg
+place_list=[1,2,3]
+for place in place_list:
+    pl_rnk = df[df.Place==place].groupby(list_gb_race_leg, as_index=False)['Time'].mean()
+    suffix2 = '_PL'+str(place)
+    df = df.merge(pl_rnk,how='left',on=list_gb_race_leg,suffixes=('',suffix2 ))
+    df['Time'+suffix2+'Diff']=df.Time-df['Time'+suffix2]
+    df['Time'+suffix2+'Pct']=df.Time/df['Time'+suffix2]-1
+
+#create gender group
+df['Gender'] = df.Division.apply(lambda x: 'Female' if ((x == 'Junior Elite Female') | (x == 'Youth Elite Female' )) else 'Male')
+
+#best place at age 18+
+df = df.merge(df[df['Racing Age']>=18].groupby(['Name'], as_index=False)['Place'].max(),how='left', left_on='Name',right_on='Name',suffixes=('', '_MAX_18+') )
+
+#--nth race in data
+df['Date'] = df.Date.astype('datetime64[ns]')
+gb_nrace = df.loc[( (df.Valid==True) & (df.Race_Leg=='Swim') ),:].groupby(['Name','Race_Name','Division'])['Date'].rank(method='min').to_frame(name='N_Race_In_Data')
+gb_nrace = gb_nrace.merge(df[['Name','Date','Race_Name','Division']],left_index=True,right_index=True,how='left')
+df = df.merge(gb_nrace,on = ['Name','Date','Race_Name','Division'],how='left' )
+
+
+#--min race in data
+#df_races2 = df_races2.drop(['MIN_RACE_AGE_IN_DATA','MIN_DATE_IN_DATA'],axis=1)
+grp_min_date_age = df.groupby('Name')[['Date','Racing Age']].min()
+grp_min_date_age = grp_min_date_age.rename(columns={"Date": "MIN_DATE_IN_DATA", "Racing Age": "MIN_RACING_AGE_IN_DATA"})
+df = df.merge(grp_min_date_age,how='left',left_on = 'Name', right_index=True)
+
+df = df.merge(df[df['Racing Age']==16].groupby(['Name'], as_index=False)['Place'].max(),how='left', left_on='Name',right_on='Name',suffixes=('', '_MAX_16') )
+
+
+list_USA_races = [x for x in df.Location.unique() if x.find('USA')>=0]
+df['USA_Race'] = df.Location.isin(list_USA_races)
+
+
+df = df.merge(df[df.USA_Race==False].groupby('Name')['Date'].min(),how='left',on = 'Name',suffixes=['','_First_NonUSA_Race'])
+
+df['International_Racer_Flag'] = (df.Date_First_NonUSA_Race<=df.Date)
 
 #zzz_test_swim_t1_ct= df_races2[df_races.Swim_T1>].groupby(['Race_Name','Division','Date','Name'], as_index=False)['Swim_T1']
 #df_races2['Swim_T1_w/in_'+sec_window]
 
-dist_dict = {'Junior Elite Male': {'Swim':750,'Bike':19.3121,'Run':5,'Gender': 'Male'}
-                ,'Junior Elite Female':{'Swim':750,'Bike':19.3121,'Run':5,'Gender': 'Female'}
-                ,'Youth Elite Male':{'Swim':375,'Bike':9.65606,'Run':2.41402,'Gender': 'Male'}
-                ,'Youth Elite Female':{'Swim':376,'Bike':9.65606,'Run':2.41402,'Gender': 'Female'} }
-
-
-#used to create z scores, ended up just picking valid times manually in a dict
-#for time_col in time_cols:
-#    grp = 'Division'
-#    df_grp_division = df_races2.groupby(grp, as_index=False)[grp,time_col].agg(['mean','std'])
-#    df_grp_division.columns = [time_col+'_avg',time_col+'_std']
-#    df_races2 = df_races2.merge(df_grp_division, left_on = 'Division', right_index=True)
+#dist_dict = {'Junior Elite Male': {'Swim':750,'Bike':19.3121,'Run':5,'Gender': 'Male'}
+#                ,'Junior Elite Female':{'Swim':750,'Bike':19.3121,'Run':5,'Gender': 'Female'}
+#                ,'Youth Elite Male':{'Swim':375,'Bike':9.65606,'Run':2.41402,'Gender': 'Male'}
+#                ,'Youth Elite Female':{'Swim':376,'Bike':9.65606,'Run':2.41402,'Gender': 'Female'} }
 #
-#for time_col in time_cols:
-#    df_races2.loc[:,time_col+'_z'] = abs( (df_races2[time_col] - df_races2[time_col+'_avg'] ) / df_races2[time_col+'_std'] )
-
-for sport in ['Swim','Bike','Run']:
-    dict_map = df_races2['Division'].map(dist_dict)
-    df_races2.loc[:,sport+'_d'] = [i.get(sport) for i in dict_map]
-
-df_races2['Swim_sp100'] = df_races2.Swim/df_races2.Swim_d*100
-df_races2['Bike_kph'] = df_races2.Bike_d/df_races2.Bike*3600
-df_races2['Run_spk'] = df_races2.Run/df_races2.Run_d
-
-## build _val columns that 1 or 0 based on valid result for each split of race
-dict_valid = { 'Swim': {'Meas' : 'Swim','Max': 1200,'Min': 100},
-                'T1': {'Meas' : 'T1','Max': 250,'Min': 0},
-                'Bike': {'Meas' : 'Bike','Max': 3000,'Min': 600},
-                'T2': {'Meas' : 'T2','Max': 150,'Min': 0},
-                'Run': {'Meas' : 'Run_spk','Max': 2000,'Min': 200}
-                }
-
-list_valid = time_cols.copy()
-list_valid.remove('Finish')
-for time_col in list_valid :
-    meas,min1,max1 = [dict_valid.get(time_col).get(key) for key in ['Meas','Min','Max'] ]
-    bounds = (df_races2[meas] > min1) & (df_races2[meas] < max1)
-    df_races2[time_col+'_val'] = bounds*1
-
-df_races2['Finish_val'] = df_races2.loc[:, [i+'_val' for i in time_cols if i != 'Finish']].sum(axis=1)
-df_races2['Finish_val'] = df_races2['Finish_val'].apply(lambda x: 1 if x==5 else 0) 
-df_races2['Finish'] = df_races2.loc[:, time_cols].sum(axis=1)#df_races2['Finish_val']==1
+#
+#for sport in ['Swim','Bike','Run']:
+#    dict_map = df_races2['Division'].map(dist_dict)
+#    df_races2.loc[:,sport+'_d'] = [i.get(sport) for i in dict_map]
+#
+#df_races2['Swim_sp100'] = df_races2.Swim/df_races2.Swim_d*100
+#df_races2['Bike_kph'] = df_races2.Bike_d/df_races2.Bike*3600
+#df_races2['Run_spk'] = df_races2.Run/df_races2.Run_d
+#
+### build _val columns that 1 or 0 based on valid result for each split of race
+#dict_valid = { 'Swim': {'Meas' : 'Swim','Max': 1200,'Min': 100},
+#                'T1': {'Meas' : 'T1','Max': 250,'Min': 0},
+#                'Bike': {'Meas' : 'Bike','Max': 3000,'Min': 600},
+#                'T2': {'Meas' : 'T2','Max': 150,'Min': 0},
+#                'Run': {'Meas' : 'Run_spk','Max': 2000,'Min': 200}
+#                }
+#
+#list_valid = time_cols.copy()
+#list_valid.remove('Finish')
+#for time_col in list_valid :
+#    meas,min1,max1 = [dict_valid.get(time_col).get(key) for key in ['Meas','Min','Max'] ]
+#    bounds = (df_races2[meas] > min1) & (df_races2[meas] < max1)
+#    df_races2[time_col+'_val'] = bounds*1
+#
+#df_races2['Finish_val'] = df_races2.loc[:, [i+'_val' for i in time_cols if i != 'Finish']].sum(axis=1)
+#df_races2['Finish_val'] = df_races2['Finish_val'].apply(lambda x: 1 if x==5 else 0) 
+#df_races2['Finish'] = df_races2.loc[:, time_cols].sum(axis=1)#df_races2['Finish_val']==1
 
 #
 #for time_col in list_valid :
 #    df_races2[time_col+'_rnk'] = df_races2[df_races2[time_col+'_val']==1][time_col].rank(method='min')
 
 #calc top 3 in each event and append on at the individual level
-for time_col in time_cols:
-    group_cols = ['Race_Name','Division','Date']#,'Racing Age'] # chose not to group by racing age
-    df_races2[time_col+'_rnk'] = df_races2[df_races2[time_col+'_val']==1].groupby(group_cols, as_index=False)[time_col].rank(method='min')
-    gb_rnk = df_races2[df_races2[time_col+'_rnk']<=3].groupby(group_cols, as_index=False)[time_col].mean()
-    df_races2 = df_races2.merge(gb_rnk,how='left',left_on = group_cols, right_on=group_cols,suffixes=('', '_Top3'))
+#for time_col in time_cols:
+#    group_cols = ['Race_Name','Division','Date']#,'Racing Age'] # chose not to group by racing age
+#    df_races2[time_col+'_rnk'] = df_races2[df_races2[time_col+'_val']==1].groupby(group_cols, as_index=False)[time_col].rank(method='min')
+#    gb_rnk = df_races2[df_races2[time_col+'_rnk']<=3].groupby(group_cols, as_index=False)[time_col].mean()
+#    df_races2 = df_races2.merge(gb_rnk,how='left',left_on = group_cols, right_on=group_cols,suffixes=('', '_Top3'))
+#
+##calc top 3 overall times
+#place_list=[1,2,3]
+#time_cols2 = time_cols+['Bike_In']
+#for time_col in time_cols2:
+#    print(time_col)
+#    group_cols = ['Race_Name','Division','Date']
+#    for place in place_list:
+#        print(place)
+#        group_cols2 = group_cols + [time_col]
+#        print(group_cols2)
+#        pl_rnk = df_races2[df_races2['Place']==place].groupby(group_cols, as_index=False)[time_col].mean()
+#        print(pl_rnk.shape)
+#        suffix2 = '_PL'+str(place)
+#        df_races2 = df_races2.merge(pl_rnk,how='left',on=group_cols,suffixes=('',suffix2 ))
+#        df_races2[time_col+suffix2+'Diff']=df_races2[time_col+suffix2]-df_races2[time_col]
+#
+##    for col_from in df_Top3.columns:
+##        if col_from in time_cols: df_Top3.rename(columns={col_from:col_from+'_Top3'}, inplace=True)
+#    
+##    df_races2 = df_races2.merge(df_Top3, left_on = group_cols, right_on=group_cols)
+#
+#
+#for time_col in time_cols:
+#    df_races2.loc[:,time_col+'_pct'] = df_races2[time_col+'_Top3']/df_races2[time_col]
+#
+#df_races2['Gender'] = df_races2['Division'].apply(lambda x: 'Female' if ((x == 'Junior Elite Female') | (x == 'Youth Elite Female' )) else 'Male')
+#
+#df_races2 = df_races2.merge(df_races2[df_races2['Racing Age']>=18].groupby(['Name'], as_index=False)['Place'].max(),how='left', left_on='Name',right_on='Name',suffixes=('', '_MAX_18+') )
+##df_races2 = df_races2.drop(['Max_Place_19','Place_MAX_19'],axis=1)
+#
+##--nth race
+#df_races2['Nth_Race'] = df_races2.apply(lambda row: sum(df_races2.loc[ (row.Name==df_races2.Name.values)&(row.Date>=df_races2.Date.values),'Swim_val']  ) ,axis=1)
+#
+#
+##df_races2 = df_races2.drop(['MIN_RACE_AGE_IN_DATA','MIN_DATE_IN_DATA'],axis=1)
+#grp_min_date_age = df_races2.groupby('Name')['Date','Racing Age'].min()
+#grp_min_date_age = grp_min_date_age.rename(columns={"Date": "MIN_DATE_IN_DATA", "Racing Age": "MIN_RACING_AGE_IN_DATA"})
+#df_races2 = df_races2.merge(grp_min_date_age,how='left',left_on = 'Name', right_index=True)
+#
+#df_races2 = df_races2.merge(df_races2[df_races2['Racing Age']==16].groupby(['Name'], as_index=False)['Place'].max(),how='left', left_on='Name',right_on='Name',suffixes=('', '_MAX_16') )
+#
 
-#calc top 3 overall times
-place_list=[1,2,3]
-time_cols2 = time_cols+['Bike_In']
-for time_col in time_cols2:
-    print(time_col)
-    group_cols = ['Race_Name','Division','Date']
-    for place in place_list:
-        print(place)
-        group_cols2 = group_cols + [time_col]
-        print(group_cols2)
-        pl_rnk = df_races2[df_races2['Place']==place].groupby(group_cols, as_index=False)[time_col].mean()
-        print(pl_rnk.shape)
-        suffix2 = '_PL'+str(place)
-        df_races2 = df_races2.merge(pl_rnk,how='left',on=group_cols,suffixes=('',suffix2 ))
-        df_races2[time_col+suffix2+'Diff']=df_races2[time_col+suffix2]-df_races2[time_col]
-
-#    for col_from in df_Top3.columns:
-#        if col_from in time_cols: df_Top3.rename(columns={col_from:col_from+'_Top3'}, inplace=True)
-    
-#    df_races2 = df_races2.merge(df_Top3, left_on = group_cols, right_on=group_cols)
-
-
-for time_col in time_cols:
-    df_races2.loc[:,time_col+'_pct'] = df_races2[time_col+'_Top3']/df_races2[time_col]
-
-df_races2['Gender'] = df_races2['Division'].apply(lambda x: 'Female' if ((x == 'Junior Elite Female') | (x == 'Youth Elite Female' )) else 'Male')
-
-df_races2 = df_races2.merge(df_races2[df_races2['Racing Age']>=18].groupby(['Name'], as_index=False)['Place'].max(),how='left', left_on='Name',right_on='Name',suffixes=('', '_MAX_18+') )
-#df_races2 = df_races2.drop(['Max_Place_19','Place_MAX_19'],axis=1)
-
-#--nth race
-df_races2['Nth_Race'] = df_races2.apply(lambda row: sum(df_races2.loc[ (row.Name==df_races2.Name.values)&(row.Date>=df_races2.Date.values),'Swim_val']  ) ,axis=1)
-
-
-#df_races2 = df_races2.drop(['MIN_RACE_AGE_IN_DATA','MIN_DATE_IN_DATA'],axis=1)
-grp_min_date_age = df_races2.groupby('Name')['Date','Racing Age'].min()
-grp_min_date_age = grp_min_date_age.rename(columns={"Date": "MIN_DATE_IN_DATA", "Racing Age": "MIN_RACING_AGE_IN_DATA"})
-df_races2 = df_races2.merge(grp_min_date_age,how='left',left_on = 'Name', right_index=True)
-
-df_races2 = df_races2.merge(df_races2[df_races2['Racing Age']==16].groupby(['Name'], as_index=False)['Place'].max(),how='left', left_on='Name',right_on='Name',suffixes=('', '_MAX_16') )
-
-
-
-RACES_FILENAME_final = 'C:/Users/Read/Desktop/Code/Python/USAT/RACE_DATA_final.csv'
-df_races2.to_csv(RACES_FILENAME_final, encoding='utf-8', index=True)
+#write table
+RACES_FILENAME_final2 = 'C:/Users/Read/Desktop/Code/Python/USAT/RACE_DATA_final2.csv'
+df.to_csv(RACES_FILENAME_final2, encoding='utf-8', index=True)
 #pull saved data
-df_races2 = pd.read_csv(RACES_FILENAME_final)
-df_races2 = df_races2.drop(['Unnamed: 0'], axis = 1) 
+#df_races2 = pd.read_csv(RACES_FILENAME_final)
+#df_races2 = df_races2.drop(['Unnamed: 0'], axis = 1) 
 
 
 
