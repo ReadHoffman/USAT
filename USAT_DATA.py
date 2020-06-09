@@ -26,9 +26,18 @@ from selenium.webdriver.common.keys import Keys
 #modeling
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn import linear_model
+from sklearn import svm
+from sklearn.linear_model import Lasso
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
 from rfpimp import permutation_importances
 from sklearn.metrics import r2_score
+from sklearn.preprocessing import LabelEncoder
+
+#other
 import statistics
 from yellowbrick.regressor import ResidualsPlot
 
@@ -142,11 +151,12 @@ data notes
 -dnf records have out of pattern low times and times that make no sense, messy
 -some records have out of pattern high times eg with 01:20:05 bike time
 -some records have  35:09:00 format
--
 
-idea
--does the time make sense based on the race, is it within some reasonable std dev of mean time
--
+post-ETL notes
+-some Finish Times are FUBAR.  as a general rule, I wouldn't recommend trusting finsh times
+-if you really need a finish time, make an aggregate one one valid race leg times
+
+
 """
 
 
@@ -167,6 +177,7 @@ dict_legs = {
     ,'T2': { 'Legs':['T2'] , 'PCT_FR_MED_HI': 4, 'PCT_FR_MED_LO': -.3, 'Time_col':True } 
     ,'Run': { 'Legs':['Run'] , 'PCT_FR_MED_HI': 2, 'PCT_FR_MED_LO': -.3, 'Time_col':True } 
     ,'Finish': { 'Legs':['Swim','T1','Bike','T2','Run']  , 'PCT_FR_MED_HI': 2,'PCT_FR_MED_LO': -.3,'Time_col':True } 
+    ,'Finish_Calc': { 'Legs':['Swim','T1','Bike','T2','Run']  , 'PCT_FR_MED_HI': 2,'PCT_FR_MED_LO': -.3,'Time_col':False } 
     ,'Bike_Out': { 'Legs':['Swim','T1'] , 'PCT_FR_MED_HI': 2,'PCT_FR_MED_LO': -.3, 'Time_col':False } 
     , 'Bike_In': { 'Legs':['Swim','T1','Bike'] , 'PCT_FR_MED_HI': 2 ,'PCT_FR_MED_LO': -.3,'Time_col':False} 
     , 'Run_Out': { 'Legs':['Swim','T1','Bike','T2']  , 'PCT_FR_MED_HI': 2 ,'PCT_FR_MED_LO': -.3,'Time_col':False} 
@@ -230,9 +241,7 @@ df['Var_From_20_PCTLE_Pct'] = df.Time/df.Quantile_20-1
 df['Var_From_80_PCTLE_Pct'] = df.Time/df.Quantile_80-1
 df['PCT_FR_MED_HI'] = df.Race_Leg.apply(lambda x: dict_legs.get(x)['PCT_FR_MED_HI'])
 df['PCT_FR_MED_LO'] = df.Race_Leg.apply(lambda x: dict_legs.get(x)['PCT_FR_MED_LO'])
-df['Valid'] = (df.Var_From_80_PCTLE_Pct<df['PCT_FR_MED_HI']) & (df.Var_From_20_PCTLE_Pct>df['PCT_FR_MED_LO'] ) 
-
-df.groupby(['Valid']).count()
+df['Valid'] = (df.Var_From_80_PCTLE_Pct<df['PCT_FR_MED_HI']) & (df.Var_From_20_PCTLE_Pct>df['PCT_FR_MED_LO'] ) & (df.Time<12000)
 
 
 
@@ -268,6 +277,8 @@ df = pd.concat([df,df_aggs], ignore_index=True, axis=0,sort=False).sort_values(b
 df['Time_Rank'] = df[df.Valid==True].groupby(list_gb_race_leg, as_index=False)['Time'].rank(method='min')
 gb_rnk = df[df.Time_Rank<=3].groupby(list_gb_race_leg, as_index=False)['Time'].mean()
 df = df.merge(gb_rnk,how='left',left_on = list_gb_race_leg, right_on=list_gb_race_leg,suffixes=('', '_Top3'))
+df.loc[(df.Valid==True),'Time_Top3Pct'] = (df.loc[(df.Valid==True),'Time'] /df.loc[(df.Valid==True),'Time_Top3'] )-1
+
 
 #calc top 3 podium overall times for each race leg
 place_list=[1,2,3]
@@ -286,7 +297,7 @@ df = df.merge(df[df['Racing Age']>=18].groupby(['Name'], as_index=False)['Place'
 
 #--nth race in data
 df['Date'] = df.Date.astype('datetime64[ns]')
-gb_nrace = df.loc[( (df.Valid==True) & (df.Race_Leg=='Swim') ),:].groupby(['Name','Race_Name','Division'])['Date'].rank(method='min').to_frame(name='N_Race_In_Data')
+gb_nrace = df.loc[( (df.Valid==True) & (df.Race_Leg=='Swim') ),:].groupby(['Name'])['Date'].rank(method='min').to_frame(name='N_Race_In_Data')
 gb_nrace = gb_nrace.merge(df[['Name','Date','Race_Name','Division']],left_index=True,right_index=True,how='left')
 df = df.merge(gb_nrace,on = ['Name','Date','Race_Name','Division'],how='left' )
 
@@ -308,94 +319,41 @@ df = df.merge(df[df.USA_Race==False].groupby('Name')['Date'].min(),how='left',on
 
 df['International_Racer_Flag'] = (df.Date_First_NonUSA_Race<=df.Date)
 
-#zzz_test_swim_t1_ct= df_races2[df_races.Swim_T1>].groupby(['Race_Name','Division','Date','Name'], as_index=False)['Swim_T1']
-#df_races2['Swim_T1_w/in_'+sec_window]
 
-#dist_dict = {'Junior Elite Male': {'Swim':750,'Bike':19.3121,'Run':5,'Gender': 'Male'}
-#                ,'Junior Elite Female':{'Swim':750,'Bike':19.3121,'Run':5,'Gender': 'Female'}
-#                ,'Youth Elite Male':{'Swim':375,'Bike':9.65606,'Run':2.41402,'Gender': 'Male'}
-#                ,'Youth Elite Female':{'Swim':376,'Bike':9.65606,'Run':2.41402,'Gender': 'Female'} }
-#
-#
-#for sport in ['Swim','Bike','Run']:
-#    dict_map = df_races2['Division'].map(dist_dict)
-#    df_races2.loc[:,sport+'_d'] = [i.get(sport) for i in dict_map]
-#
-#df_races2['Swim_sp100'] = df_races2.Swim/df_races2.Swim_d*100
-#df_races2['Bike_kph'] = df_races2.Bike_d/df_races2.Bike*3600
-#df_races2['Run_spk'] = df_races2.Run/df_races2.Run_d
-#
-### build _val columns that 1 or 0 based on valid result for each split of race
-#dict_valid = { 'Swim': {'Meas' : 'Swim','Max': 1200,'Min': 100},
-#                'T1': {'Meas' : 'T1','Max': 250,'Min': 0},
-#                'Bike': {'Meas' : 'Bike','Max': 3000,'Min': 600},
-#                'T2': {'Meas' : 'T2','Max': 150,'Min': 0},
-#                'Run': {'Meas' : 'Run_spk','Max': 2000,'Min': 200}
-#                }
-#
-#list_valid = time_cols.copy()
-#list_valid.remove('Finish')
-#for time_col in list_valid :
-#    meas,min1,max1 = [dict_valid.get(time_col).get(key) for key in ['Meas','Min','Max'] ]
-#    bounds = (df_races2[meas] > min1) & (df_races2[meas] < max1)
-#    df_races2[time_col+'_val'] = bounds*1
-#
-#df_races2['Finish_val'] = df_races2.loc[:, [i+'_val' for i in time_cols if i != 'Finish']].sum(axis=1)
-#df_races2['Finish_val'] = df_races2['Finish_val'].apply(lambda x: 1 if x==5 else 0) 
-#df_races2['Finish'] = df_races2.loc[:, time_cols].sum(axis=1)#df_races2['Finish_val']==1
+## more fields for modeling ## 2020-06-07
 
-#
-#for time_col in list_valid :
-#    df_races2[time_col+'_rnk'] = df_races2[df_races2[time_col+'_val']==1][time_col].rank(method='min')
+df.loc[(df.Valid==True),'Time_PctPri1'] = df.loc[(df.Valid==True),:].sort_values(by=['Date'], ascending=True).groupby(['Name','Race_Leg'])['Time_Top3Pct'].shift(1)
+df.loc[(df.Valid==True),'Time_PctPri2'] = df.loc[(df.Valid==True),:].sort_values(by=['Date'], ascending=True).groupby(['Name','Race_Leg'])['Time_Top3Pct'].shift(2)
+df.loc[(df.Valid==True),'Time_PctPri3'] = df.loc[(df.Valid==True),:].sort_values(by=['Date'], ascending=True).groupby(['Name','Race_Leg'])['Time_Top3Pct'].shift(3)
+df['Time_PctPriAvg3'] = (df['Time_PctPri1'].fillna(0) + df['Time_PctPri2'].fillna(0) + df['Time_PctPri3'].fillna(0)) /  (df['Time_PctPri1'].notna()*1+df['Time_PctPri2'].notna()*1+df['Time_PctPri3'].notna()*1)  ## figure how to make these ints sum ###
+df['Time_PctPriAMax3'] = df.loc[:,['Time_PctPri1','Time_PctPri2','Time_PctPri3']].max(axis=1, skipna=False)
+df['Time_PctPriAMin3'] = df.loc[:,['Time_PctPri1','Time_PctPri2','Time_PctPri3']].min(axis=1, skipna=False)
 
-#calc top 3 in each event and append on at the individual level
-#for time_col in time_cols:
-#    group_cols = ['Race_Name','Division','Date']#,'Racing Age'] # chose not to group by racing age
-#    df_races2[time_col+'_rnk'] = df_races2[df_races2[time_col+'_val']==1].groupby(group_cols, as_index=False)[time_col].rank(method='min')
-#    gb_rnk = df_races2[df_races2[time_col+'_rnk']<=3].groupby(group_cols, as_index=False)[time_col].mean()
-#    df_races2 = df_races2.merge(gb_rnk,how='left',left_on = group_cols, right_on=group_cols,suffixes=('', '_Top3'))
-#
-##calc top 3 overall times
-#place_list=[1,2,3]
-#time_cols2 = time_cols+['Bike_In']
-#for time_col in time_cols2:
-#    print(time_col)
-#    group_cols = ['Race_Name','Division','Date']
-#    for place in place_list:
-#        print(place)
-#        group_cols2 = group_cols + [time_col]
-#        print(group_cols2)
-#        pl_rnk = df_races2[df_races2['Place']==place].groupby(group_cols, as_index=False)[time_col].mean()
-#        print(pl_rnk.shape)
-#        suffix2 = '_PL'+str(place)
-#        df_races2 = df_races2.merge(pl_rnk,how='left',on=group_cols,suffixes=('',suffix2 ))
-#        df_races2[time_col+suffix2+'Diff']=df_races2[time_col+suffix2]-df_races2[time_col]
-#
-##    for col_from in df_Top3.columns:
-##        if col_from in time_cols: df_Top3.rename(columns={col_from:col_from+'_Top3'}, inplace=True)
-#    
-##    df_races2 = df_races2.merge(df_Top3, left_on = group_cols, right_on=group_cols)
-#
-#
-#for time_col in time_cols:
-#    df_races2.loc[:,time_col+'_pct'] = df_races2[time_col+'_Top3']/df_races2[time_col]
-#
-#df_races2['Gender'] = df_races2['Division'].apply(lambda x: 'Female' if ((x == 'Junior Elite Female') | (x == 'Youth Elite Female' )) else 'Male')
-#
-#df_races2 = df_races2.merge(df_races2[df_races2['Racing Age']>=18].groupby(['Name'], as_index=False)['Place'].max(),how='left', left_on='Name',right_on='Name',suffixes=('', '_MAX_18+') )
-##df_races2 = df_races2.drop(['Max_Place_19','Place_MAX_19'],axis=1)
-#
-##--nth race
-#df_races2['Nth_Race'] = df_races2.apply(lambda row: sum(df_races2.loc[ (row.Name==df_races2.Name.values)&(row.Date>=df_races2.Date.values),'Swim_val']  ) ,axis=1)
-#
-#
-##df_races2 = df_races2.drop(['MIN_RACE_AGE_IN_DATA','MIN_DATE_IN_DATA'],axis=1)
-#grp_min_date_age = df_races2.groupby('Name')['Date','Racing Age'].min()
-#grp_min_date_age = grp_min_date_age.rename(columns={"Date": "MIN_DATE_IN_DATA", "Racing Age": "MIN_RACING_AGE_IN_DATA"})
-#df_races2 = df_races2.merge(grp_min_date_age,how='left',left_on = 'Name', right_index=True)
-#
-#df_races2 = df_races2.merge(df_races2[df_races2['Racing Age']==16].groupby(['Name'], as_index=False)['Place'].max(),how='left', left_on='Name',right_on='Name',suffixes=('', '_MAX_16') )
-#
+#pack
+#for each race for each leg
+#sort by time
+#shift 1 to prior record , select time
+#calcualte gap to person ahead
+df.loc[(df.Valid==True),'Time_Gap'] = df.loc[(df.Valid==True),:].Time - df.loc[(df.Valid==True),:].sort_values(by=['Time'],ascending=True).groupby(list_gb_race_leg)['Time'].shift(1)
+
+
+#for each race for each leg
+#sort by time
+#if gap exceeds X seconds then 1 else 0
+#cumulative sum along x axis
+#NOT a priority
+
+
+
+# team is not null
+df['HAS_TEAM'] = df.Team.notnull()
+
+
+# best 3 last-3-race-avgs, avg together as a means for estimating how "good" top 3 will be this race
+df.loc[(df.Valid==True),'Time_PctPriAvg3_Rank'] = df.loc[(df.Valid==True),:].groupby(list_gb_race_leg)['Time_PctPriAvg3'].rank(method='min')
+
+gb_top3priavg = df.loc[(df.Time_PctPriAvg3_Rank<=3),:].groupby(list_gb_race_leg)['Time_PctPriAvg3'].mean().reset_index()
+df = df.merge(gb_top3priavg,how='left',on = list_gb_race_leg,suffixes=['','_Top3'])
 
 #write table
 RACES_FILENAME_final2 = 'C:/Users/Read/Desktop/Code/Python/USAT/RACE_DATA_final2.csv'
@@ -417,299 +375,373 @@ df.to_csv(RACES_FILENAME_final2, encoding='utf-8', index=True)
 #### Modeling #####
 ###################
 
-df_races3 = pd.read_csv(RACES_FILENAME_final)
-df_races3 = df_races3.drop(['Unnamed: 0'], axis = 1) 
+# pull cached file
+dfm = pd.read_csv(RACES_FILENAME_final2)
+dfm = dfm.drop(['Unnamed: 0'], axis = 1) 
 
 #modify/fix columns, consider moving to prev section
-df_races3['Date'] = pd.to_datetime(df_races3['Date'], format='%Y-%m-%d') 
-df_races3.loc[(df_races3.Finish_pct>1.3)|(df_races3.Finish_pct<.60),'Finish_val'] = 0  #this is a bandaid for illogical finish times
+dfm['Date'] = pd.to_datetime(dfm.Date, format='%Y-%m-%d') 
 
 #column metadata
-df_cols3 = pd.DataFrame(df_races3.columns,columns=['Field'])
+dfm_meta = pd.DataFrame(dfm.columns,columns=['Field'])  #######  STOPPED MODIFYYING HERE 2020-06-06 ######
 
-zzz_time_col = 'Swim'
-# y = target variable pct of top 3 time in race for each leg so 5 models, one for each leg
+list_features = [ 'Country'
+                 , 'Racing Age'
+                 , 'Division'
+                   , 'Race_Leg'
+                   , 'N_Race_In_Data'
+                   , 'USA_Race'
+                   , 'International_Racer_Flag'
+                   , 'Time_PctPriAvg3'
+                   , 'Time_PctPri1'
+                   , 'Time_PctPriAMax3'
+                   , 'Time_PctPriAMin3'
+                   , 'HAS_TEAM'
+                   , 'Time_PctPriAvg3_Top3'
+                   ]
+target = 'Time_Top3Pct'
+
+dfm_meta['Feature'] = dfm_meta.Field.isin(list_features)
+dfm_meta['Target'] = dfm_meta.Field==target
+
 for time_col in time_cols:
-    df_races3[time_col+'_valid'] = (df_races3[time_col]*df_races3[time_col+'_val']).replace(0,np.NaN)
+        dfm2 = dfm.loc[((dfm.Valid==True) & (dfm.Race_Leg==time_col)),:].copy()
+        dfm2 = dfm2.loc[:,list_features+[target]]
+        len(dfm2)
+                
+        #actually lets try replacing with -1 instead with the hopes that the model will understand this
+        dfm2=dfm2.fillna(-1)      
+        
+        list_nonnumeric_cols = dfm2.select_dtypes(include=['object','bool']).columns.values
+        # creating instance of labelencoder
+        dfm2=dfm2.apply(lambda x: LabelEncoder().fit_transform(x.astype(str)) )
+        
+        
+        X = dfm2.loc[:,list_features]
+        Y = dfm2.loc[:,[target]]
+        
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, Y,test_size = .2)
+        
+        
+        ##############################################################
+        
+        #tried many models, RF was best
+        #The RF Train is 0.6203183331774287. Test is 0.5494430680915874. 
+        #The GBR Train is 0.5136991863658964. Test is 0.5093991369850603. 
+        #The LINEAR REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
+        #The RIDGE REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
+        #The SVM Train is 0.19502078187297178. Test is 0.19523202707195542. 
+        #The Lasso Train is 0.3310463993531328. Test is 0.331284370399007. 
+        
+        
+        #### Random Forest Regressor
+        
+        parameters = {'bootstrap': 'True'
+                          ,'min_samples_leaf': 10
+                          ,'n_estimators': 100
+                          ,'min_samples_split': 30
+                          ,'max_features': 'auto'
+                          ,'max_depth': None
+                          ,'oob_score': True
+                          ,'n_jobs': -1
+                          ,'criterion': 'mse'
+                          ,'min_impurity_decrease': .1
+                          } 
+        rf = RandomForestRegressor(**parameters)
+        rfm = rf.fit(X_train, y_train.values.ravel())
+        #    model_predict = rf.predict(X_test).astype(int)
+        #    actual = y_test.astype(int)
+        
+        #### rf model evaluation
+        rf_train_score = rf.score(X_train,y_train)
+        rf_test_score = rf.score(X_test,y_test)
+        
+        print("The {} RF Train is {}. Test is {}. ".format(time_col,rf_train_score,rf_test_score) )
+        
+        def tot_r2(rf,X_train, y_train):
+            return r2_score(y_train, rf.predict(X_train))
+        perm_imp_rfpimp = permutation_importances(rf, X_train, y_train, tot_r2)
+
+#plt.plot(rf.predict(X_train),y_train,'o' )
+
+
+##############################################################
+
+
+##### Gradient boost regressor
+#
+##Create the model
+#gbr = GradientBoostingRegressor()
+#
+## Fit the model on the training data
+#gbr.fit(X_train, y_train.values.ravel())
+#
+## Make predictions on the test data
+#gbr_predictions = gbr.predict(X_test)
+#
+## Evaluate the model
+#gbr_train_score = gbr.score(X_train,y_train)
+#gbr_test_score = gbr.score(X_test,y_test)
+#
+#print("The GBR Train is {}. Test is {}. ".format(gbr_train_score,gbr_test_score) )
+#
+#
+#
+###############################################################
+#
+#### Linear Regression
+#
+##Create the model
+#regr = linear_model.LinearRegression()
+#
+## Fit the model on the training data
+#regr.fit(X_train, y_train.values.ravel())
+#
+## Make predictions on the test data
+#regr_predictions = regr.predict(X_test)
+#
+## Evaluate the model
+#regr_train_score = regr.score(X_train,y_train)
+#regr_test_score = regr.score(X_test,y_test)
+#
+#print("The LINEAR REGRESSION Train is {}. Test is {}. ".format(regr_train_score,regr_test_score) )
+#
+#
+###############################################################
+#
+#### Ridge Regression
+#
+##Create the model
+#ridg = linear_model.LinearRegression()
+#
+## Fit the model on the training data
+#ridg.fit(X_train, y_train.values.ravel())
+#
+## Make predictions on the test data
+#ridg_predictions = ridg.predict(X_test)
+#
+## Evaluate the model
+#ridg_train_score = ridg.score(X_train,y_train)
+#ridg_test_score = ridg.score(X_test,y_test)
+#
+#print("The RIDGE REGRESSION Train is {}. Test is {}. ".format(ridg_train_score,ridg_test_score) )
+#
+#
+###############################################################
+#
+#### SVM Regression
+###huge and The SVM REGRESSION Train is 0.19502078187297178. Test is 0.19523202707195542. 
+#
+#### Lasso Regression
+#
+##Create the model
+#lasso = Lasso()
+#
+## Fit the model on the training data
+#lasso.fit(X_train, y_train.values.ravel())
+#
+## Make predictions on the test data
+#lasso_predictions = lasso.predict(X_test)
+#
+## Evaluate the model
+#lasso_train_score = lasso.score(X_train,y_train)
+#lasso_test_score = lasso.score(X_test,y_test)
+#
+#print("The SVM REGRESSION Train is {}. Test is {}. ".format(lasso_train_score,lasso_test_score) )
+
+# this is not working, takes forever
+#logreg = LogisticRegression()
+#logreg.fit(X_train,y_train.values.ravel())
+#logreg_predictions = logreg.predict(X_train)
+#print('Train LOGREG accuracy score:',accuracy_score(y_train,logreg_predictions))
+#print('Test LOGREG accuracy score:', accuracy_score(y_test,logreg.predict(X_test)))
+## Evaluate the model
+#logreg_train_score = logreg.score(X_train,y_train)
+#logreg_test_score = logreg.score(X_test,y_test)
+#
+#print("The GBR Train is {}. Test is {}. ".format(logreg_train_score,logreg_test_score) )
+
+
+#from xgboost import XGBClassifier
+#from sklearn.model_selection import train_test_split
+#
+#
+## fit model no training data
+#xgb = XGBClassifier()
+#xgb.fit(X_train, y_train.values.ravel())
+#
+## make predictions for test data
+#xgb_predictions = xgb.predict(X_test)
+#
+## Evaluate the model
+#xgb_train_score = xgb.score(X_train,y_train)
+#xgb_test_score = xgb.score(X_test,y_test)
+#
+#print("The GBR Train is {}. Test is {}. ".format(xgb_train_score,xgb_test_score) )
 
 #
-# x =
-# racing age current
-#DONE!
-
-# n races
-#DONE!
-    
-# teamsize = n races in last 365 days, need a df by team by date
-
-
-def tm_races_ct(row):
-    bool1 = (row.Team==df_races3.Team.values)
-    bool2 = (row.Date>=df_races3.Date ).to_numpy()
-    bool3 = (df_races3.Date>=( row.Date - pd.DateOffset(years=1) ) ).to_numpy()
-    tm_race_bool =  bool1 & bool2 & bool3
-    return len(df_races3.loc[tm_race_bool,'Team'])
-
-df_races3['TM_RACES_1YR'] = df_races3.apply(lambda row: tm_races_ct(row) ,axis=1) 
-
-#--prior 1 race pct swim, lag shift 1 by athlete
-for time_col in time_cols:
-    df_races3[time_col+'_pct_pri'] = df_races3.sort_values(by=['Date'], ascending=True).groupby(['Name'])[time_col+'_pct'].shift(1)
-
-#--prior all race pct swim avg
-#--max pct swim in all prior races
-#--min pct swim in all prior races
-#--median pct swim in all prior races
-def all_pri_race_stat(row,stat,time_col):
-    bool1 = (row.Name==df_races3.Name).to_numpy()
-    bool2 = (row.Date>df_races3.Date ).to_numpy()
-    bool3 = (df_races3[time_col+'_val']==1).to_numpy()
-    tm_race_bool =  bool1 & bool2 & bool3
-    return df_races3.loc[tm_race_bool,time_col+'_pct'].agg(stat)
-
-pri_race_stats = ['mean','max','min','median']
-
-#this takes a while
-for time_col in time_cols:
-    for stat in pri_race_stats:
-        df_races3[time_col+'_pct_'+stat] = df_races3[['Name','Date']].apply( lambda row: all_pri_race_stat(row,stat,time_col) ,axis=1)
-
-
-#advanced
-# of others racing in this race, whats your pctile of prior race swim pct vs that cohort
-def competitor_pctile(row,time_col):
-    bool1 = (row.Race_Name==df_races3.Race_Name).to_numpy()
-    bool2 = (row.Division==df_races3.Division).to_numpy()
-    bool3 = (row.Date==df_races3.Date ).to_numpy()
-    bool4 = (df_races3[time_col+'_val']==1).to_numpy()
-    bool5 = (row.Name!=df_races3.Name).to_numpy()
-    tm_race_bool =  bool1 & bool2 & bool3 & bool4 & bool5
-    pctile_array = df_races3.loc[tm_race_bool,time_col+'_pct']
-    pri_percentile = stats.percentileofscore(pctile_array, row[time_col+'_pct_pri'])
-    return pri_percentile
-
-#this takes a while
-for time_col in time_cols:
-    for stat in pri_race_stats:
-        df_races3[time_col+'_pri_pct_pctile'] = df_races3.apply( lambda row: competitor_pctile(row,time_col) ,axis=1) 
-
-model_results = []
-time_col1 = 'Finish'    
-Target = [time_col1+'_pct']
-M1_Feature_List = ['Racing Age','Nth_Race','TM_RACES_1YR',time_col1+'_pct_pri',time_col1+'_pct_mean',time_col1+'_pct_max',time_col1+'_pct_min',time_col1+'_pct_median',time_col+'_race_pctile']
-
-df_model = df_races3.copy().loc[(df_races3[time_col1+'_val']==1),M1_Feature_List+Target]
-df_model['Racing Age'] = df_model['Racing Age'].replace(np.NaN,13)
-df_model['Nth_Race'] = df_model['Nth_Race'].replace(np.NaN,1)
-df_model['TM_RACES_1YR'] = df_model['TM_RACES_1YR'].replace(np.NaN,0)
-df_model[time_col+'_race_pctile'] = df_model[time_col+'_race_pctile'].replace(np.NaN,.5)
-df_model = df_model.replace(np.NaN,.85)
-df_model = df_model.dropna()
-
-X = df_model.loc[:,M1_Feature_List]
-Y = df_model.loc[:,Target]
-
-
-X_train, X_test, y_train, y_test = train_test_split(X, Y,test_size = .2)
-
-
-parameters = {'bootstrap': 'True'
-                  ,'min_samples_leaf': 20
-                  ,'n_estimators': 300
-                  ,'min_samples_split': 5
-                  ,'max_features': 'auto'
-                  ,'max_depth': 30
-                  ,'oob_score': True
-                  ,'n_jobs': 2
-                  ,'criterion': 'mse'
-#                  ,'min_impurity_decrease': .01
-                  } 
-rf = RandomForestRegressor(**parameters)
-rfm = rf.fit(X_train, y_train)
-#    model_predict = rf.predict(X_test).astype(int)
-#    actual = y_test.astype(int)
-
-#### rf model evaluation
-train_score = rf.score(X_train,y_train)
-test_score = rf.score(X_test,y_test)
-
-print("The Train is {}. Test is {}. ".format(train_score,test_score) )
-
-def tot_r2(rf,X_train, y_train):
-    return r2_score(y_train, rf.predict(X_train))
-perm_imp_rfpimp = permutation_importances(rf, X_train, y_train, tot_r2)
-
-plt.plot(rf.predict(X_train),y_train,'o' )
-
-
-
-
-
-
-
-
-
-
-tot_y = Y
-tot_X = X
-tot_X_train, tot_X_test, tot_y_train, tot_y_test = train_test_split(tot_X, tot_y,test_size = .4)
-tot_X_val, tot_X_test, tot_y_val, tot_y_test = train_test_split(tot_X_test, tot_y_test,test_size = .5)
-
-# define model function
-def tot_do_rf_model(bootstrap, min_samples_leaf, n_estimators,min_samples_split, 
-          max_features, max_depth, oob_score, n_jobs, criterion, 
-          X_train1, X_test1, y_train1, y_test1 ):
-    parameters = {'bootstrap': bootstrap, #True
-                      'min_samples_leaf': min_samples_leaf, #10
-                      'n_estimators': n_estimators, #300
-                      'min_samples_split': min_samples_split, #2
-                      'max_features': max_features, #log2
-                      'max_depth': max_depth, #none
-                      'oob_score': oob_score, #True
-                      'n_jobs': n_jobs, #2
-                      'criterion': criterion
-                      } #mae
-    tot_rf = RandomForestRegressor(**parameters)
-    tot_rf.fit(X_train1, y_train1)
-#    model_predict = rf.predict(X_test).astype(int)
-#    actual = y_test.astype(int)
-
-    #### rf model evaluation
-    tot_train_score = tot_rf.score(X_train1,y_train1)
-    tot_test_score = tot_rf.score(X_test1,y_test1)
-    tot_tr_minus_tst = tot_train_score-tot_test_score
-    tot_tr_over_tst = tot_train_score/tot_test_score
-
-    return([tot_train_score,tot_test_score,tot_tr_minus_tst,tot_rf,tot_tr_over_tst])
-
-
-
-tot_bootstrap_opts = ['True','False']
-tot_min_samples_leaf_opts = [20,40]
-tot_n_estimators_opts = [100]
-tot_min_samples_split_opts = [100]
-tot_max_features_opts = ['auto']#'log2','sqrt',]
-tot_max_depth_opts = [10,40] #none
-tot_oob_score_opts = [True]#,False]
-tot_n_jobs_opts = [2]
-tot_criterion_opts = ['mse','mae']
-tot_min_impurity_dec_opts = [.2] #A node will be split if this split induces a decrease of the impurity greater than or equal to this value.
-
-tot_param_objects = [tot_bootstrap_opts, tot_min_samples_leaf_opts,tot_n_estimators_opts,tot_min_samples_split_opts,tot_max_features_opts,tot_max_depth_opts
-               ,tot_oob_score_opts,tot_n_jobs_opts,tot_criterion_opts]
-tot_param_names = ["tot_bootstrap_opts", "tot_min_samples_leaf_opts","tot_n_estimators_opts","tot_min_samples_split_opts","tot_max_features_opts","tot_max_depth_opts"
-               ,"tot_oob_score_opts","tot_n_jobs_opts","tot_criterion_opts"]
-
-#build cartesian product of parameters
-tot_index1 = pd.MultiIndex.from_product(tot_param_objects, names = tot_param_names)
-tot_eval_df = pd.DataFrame(index = tot_index1).reset_index()
-
-#RandomForestRegressor()
-
-tot_result_df = pd.DataFrame(columns = ['tot_iteration','tot_train_score','tot_test_score','tot_tr_minus_tst','tot_tr_over_tst'])
-for i in range(len(tot_eval_df)): 
-    print(i)
-    x,y,z,model,aa = tot_do_rf_model(
-          bootstrap = tot_eval_df.loc[i,"tot_bootstrap_opts"], #True
-          min_samples_leaf= tot_eval_df.loc[i,"tot_min_samples_leaf_opts"], #10
-          n_estimators= tot_eval_df.loc[i,"tot_n_estimators_opts"], #300
-          min_samples_split= tot_eval_df.loc[i,"tot_min_samples_split_opts"], #2
-          max_features= tot_eval_df.loc[i,"tot_max_features_opts"], #log2
-          max_depth= None, #tot_eval_df.loc[i,"tot_max_depth_opts"], #none
-          oob_score= tot_eval_df.loc[i,"tot_oob_score_opts"], #True
-          n_jobs= tot_eval_df.loc[i,"tot_n_jobs_opts"], #2
-          criterion= tot_eval_df.loc[i,"tot_criterion_opts"],
-          X_train1=tot_X_train, X_test1=tot_X_test, y_train1=tot_y_train, y_test1=tot_y_test
-            )
-    tot_result_df.loc[i,:] = [i,x,y,z,aa]
-
-
-tot_eval_df=tot_eval_df.merge(tot_result_df,left_on=tot_eval_df.index,right_on='tot_iteration',how='left')
-plt.plot(tot_eval_df['tot_train_score'],tot_eval_df['tot_test_score'],'o')
-
-
-tot_eval_df = tot_eval_df.sort_values(by='tot_tr_over_tst',ascending=False).reset_index(drop=True)
-tot_best_params = tot_eval_df[tot_eval_df.index==0]
-
-# run model on best params
-tot_rf=tot_do_rf_model(bootstrap = tot_best_params.loc[0,"tot_bootstrap_opts"], #True
-          min_samples_leaf= tot_best_params.loc[0,"tot_min_samples_leaf_opts"], #10
-          n_estimators= tot_best_params.loc[0,"tot_n_estimators_opts"], #300
-          min_samples_split= tot_best_params.loc[0,"tot_min_samples_split_opts"], #2
-          max_features= tot_best_params.loc[0,"tot_max_features_opts"], #log2
-          max_depth= tot_best_params.loc[0,"tot_max_depth_opts"], #none
-          oob_score= tot_best_params.loc[0,"tot_oob_score_opts"], #True
-          n_jobs= tot_best_params.loc[0,"tot_n_jobs_opts"], #2
-          criterion= tot_best_params.loc[0,"tot_criterion_opts"],
-          X_train1=tot_X_train, X_test1=tot_X_val, y_train1=tot_y_train, y_test1=tot_y_val
-          )
-tot_rfm = tot_rf[3]
-tot_model_predict = tot_rfm.predict(tot_X_val).astype(int)
-tot_actual = tot_y_val.astype(int)
-
-print("The Train is {}. Test is {}. Validation is {}. ".format(tot_rf[0],tot_best_params.loc[0,'tot_test_score'], tot_rf[1]) )
-print("R2 of Validation is: {}".format(r2_score(tot_actual, tot_model_predict)))
-
-##feature importance
-def tot_r2(tot_rfm, tot_X_train, tot_y_train):
-    return r2_score(tot_y_train, tot_rfm.predict(tot_X_train))
-tot_perm_imp_rfpimp = permutation_importances(tot_rfm, tot_X_train, tot_y_train, tot_r2)
-tot_perm_imp_rfpimp.reset_index(drop = False, inplace = True)
-
-
-# plots
-tot_fig, (tot_ax1, tot_ax2) = plt.subplots(1, 2)
-tot_fig.suptitle('MODEL_EVALUATIONs')
-tot_ax1.plot(tot_eval_df['tot_train_score'],tot_eval_df['tot_test_score'],'o')
-
-tot_coef = np.polyfit(tot_model_predict,tot_actual,1)
-tot_poly1d_fn = np.poly1d(tot_coef) 
-
-tot_ax2.plot(tot_model_predict,tot_actual, 'o')
-
-# standard deviation
-abs_variance_val = abs(tot_model_predict-tot_actual)
-
-print("The Point Standard Deviation is: {}".format(  statistics.stdev(abs_variance_val)  ) )
-
-
-visualizer = ResidualsPlot(tot_rfm)
-visualizer.fit(tot_X_train, tot_y_train)  # Fit the training data to the visualizer
-visualizer.score(tot_X_test, tot_y_test)  # Evaluate the model on the test data
-visualizer.show()                 # Finalize and render the figure
-
-
-
-
-
-
-
-
-
-
-####more models
-from sklearn.ensemble import MinMaxScaler
-
-# Create the scaler object with a range of 0-1
-scaler = MinMaxScaler(feature_range=(0, 1))
-# Fit on the training data
-scaler.fit(X)
-# Transform both the training and testing data
-X = scaler.transform(X)
-X_test = scaler.transform(X_test)
-
-from sklearn.ensemble import GradientBoostingRegressor
-
-# Create the model
-gradient_boosted = GradientBoostingRegressor()
-
-# Fit the model on the training data
-gradient_boosted.fit(X, y)
-
-# Make predictions on the test data
-predictions = gradient_boosted.predict(X_test)
-
-# Evaluate the model
-mae = np.mean(abs(predictions - y_test))
-
-print('Gradient Boosted Performance on the test set: MAE = %0.4f' % mae)
+#
+#tot_y = Y
+#tot_X = X
+#tot_X_train, tot_X_test, tot_y_train, tot_y_test = train_test_split(tot_X, tot_y,test_size = .4)
+#tot_X_val, tot_X_test, tot_y_val, tot_y_test = train_test_split(tot_X_test, tot_y_test,test_size = .5)
+#
+## define model function
+#def tot_do_rf_model(bootstrap, min_samples_leaf, n_estimators,min_samples_split, 
+#          max_features, max_depth, oob_score, n_jobs, criterion, 
+#          X_train1, X_test1, y_train1, y_test1 ):
+#    parameters = {'bootstrap': bootstrap, #True
+#                      'min_samples_leaf': min_samples_leaf, #10
+#                      'n_estimators': n_estimators, #300
+#                      'min_samples_split': min_samples_split, #2
+#                      'max_features': max_features, #log2
+#                      'max_depth': max_depth, #none
+#                      'oob_score': oob_score, #True
+#                      'n_jobs': n_jobs, #2
+#                      'criterion': criterion
+#                      } #mae
+#    tot_rf = RandomForestRegressor(**parameters)
+#    tot_rf.fit(X_train1, y_train1)
+##    model_predict = rf.predict(X_test).astype(int)
+##    actual = y_test.astype(int)
+#
+#    #### rf model evaluation
+#    tot_train_score = tot_rf.score(X_train1,y_train1)
+#    tot_test_score = tot_rf.score(X_test1,y_test1)
+#    tot_tr_minus_tst = tot_train_score-tot_test_score
+#    tot_tr_over_tst = tot_train_score/tot_test_score
+#
+#    return([tot_train_score,tot_test_score,tot_tr_minus_tst,tot_rf,tot_tr_over_tst])
+#
+#
+#
+#tot_bootstrap_opts = ['True','False']
+#tot_min_samples_leaf_opts = [20,40]
+#tot_n_estimators_opts = [100]
+#tot_min_samples_split_opts = [100]
+#tot_max_features_opts = ['auto']#'log2','sqrt',]
+#tot_max_depth_opts = [10,40] #none
+#tot_oob_score_opts = [True]#,False]
+#tot_n_jobs_opts = [2]
+#tot_criterion_opts = ['mse','mae']
+#tot_min_impurity_dec_opts = [.2] #A node will be split if this split induces a decrease of the impurity greater than or equal to this value.
+#
+#tot_param_objects = [tot_bootstrap_opts, tot_min_samples_leaf_opts,tot_n_estimators_opts,tot_min_samples_split_opts,tot_max_features_opts,tot_max_depth_opts
+#               ,tot_oob_score_opts,tot_n_jobs_opts,tot_criterion_opts]
+#tot_param_names = ["tot_bootstrap_opts", "tot_min_samples_leaf_opts","tot_n_estimators_opts","tot_min_samples_split_opts","tot_max_features_opts","tot_max_depth_opts"
+#               ,"tot_oob_score_opts","tot_n_jobs_opts","tot_criterion_opts"]
+#
+##build cartesian product of parameters
+#tot_index1 = pd.MultiIndex.from_product(tot_param_objects, names = tot_param_names)
+#tot_eval_df = pd.DataFrame(index = tot_index1).reset_index()
+#
+##RandomForestRegressor()
+#
+#tot_result_df = pd.DataFrame(columns = ['tot_iteration','tot_train_score','tot_test_score','tot_tr_minus_tst','tot_tr_over_tst'])
+#for i in range(len(tot_eval_df)): 
+#    print(i)
+#    x,y,z,model,aa = tot_do_rf_model(
+#          bootstrap = tot_eval_df.loc[i,"tot_bootstrap_opts"], #True
+#          min_samples_leaf= tot_eval_df.loc[i,"tot_min_samples_leaf_opts"], #10
+#          n_estimators= tot_eval_df.loc[i,"tot_n_estimators_opts"], #300
+#          min_samples_split= tot_eval_df.loc[i,"tot_min_samples_split_opts"], #2
+#          max_features= tot_eval_df.loc[i,"tot_max_features_opts"], #log2
+#          max_depth= None, #tot_eval_df.loc[i,"tot_max_depth_opts"], #none
+#          oob_score= tot_eval_df.loc[i,"tot_oob_score_opts"], #True
+#          n_jobs= tot_eval_df.loc[i,"tot_n_jobs_opts"], #2
+#          criterion= tot_eval_df.loc[i,"tot_criterion_opts"],
+#          X_train1=tot_X_train, X_test1=tot_X_test, y_train1=tot_y_train, y_test1=tot_y_test
+#            )
+#    tot_result_df.loc[i,:] = [i,x,y,z,aa]
+#
+#
+#tot_eval_df=tot_eval_df.merge(tot_result_df,left_on=tot_eval_df.index,right_on='tot_iteration',how='left')
+#plt.plot(tot_eval_df['tot_train_score'],tot_eval_df['tot_test_score'],'o')
+#
+#
+#tot_eval_df = tot_eval_df.sort_values(by='tot_tr_over_tst',ascending=False).reset_index(drop=True)
+#tot_best_params = tot_eval_df[tot_eval_df.index==0]
+#
+## run model on best params
+#tot_rf=tot_do_rf_model(bootstrap = tot_best_params.loc[0,"tot_bootstrap_opts"], #True
+#          min_samples_leaf= tot_best_params.loc[0,"tot_min_samples_leaf_opts"], #10
+#          n_estimators= tot_best_params.loc[0,"tot_n_estimators_opts"], #300
+#          min_samples_split= tot_best_params.loc[0,"tot_min_samples_split_opts"], #2
+#          max_features= tot_best_params.loc[0,"tot_max_features_opts"], #log2
+#          max_depth= tot_best_params.loc[0,"tot_max_depth_opts"], #none
+#          oob_score= tot_best_params.loc[0,"tot_oob_score_opts"], #True
+#          n_jobs= tot_best_params.loc[0,"tot_n_jobs_opts"], #2
+#          criterion= tot_best_params.loc[0,"tot_criterion_opts"],
+#          X_train1=tot_X_train, X_test1=tot_X_val, y_train1=tot_y_train, y_test1=tot_y_val
+#          )
+#tot_rfm = tot_rf[3]
+#tot_model_predict = tot_rfm.predict(tot_X_val).astype(int)
+#tot_actual = tot_y_val.astype(int)
+#
+#print("The Train is {}. Test is {}. Validation is {}. ".format(tot_rf[0],tot_best_params.loc[0,'tot_test_score'], tot_rf[1]) )
+#print("R2 of Validation is: {}".format(r2_score(tot_actual, tot_model_predict)))
+#
+###feature importance
+#def tot_r2(tot_rfm, tot_X_train, tot_y_train):
+#    return r2_score(tot_y_train, tot_rfm.predict(tot_X_train))
+#tot_perm_imp_rfpimp = permutation_importances(tot_rfm, tot_X_train, tot_y_train, tot_r2)
+#tot_perm_imp_rfpimp.reset_index(drop = False, inplace = True)
+#
+#
+## plots
+#tot_fig, (tot_ax1, tot_ax2) = plt.subplots(1, 2)
+#tot_fig.suptitle('MODEL_EVALUATIONs')
+#tot_ax1.plot(tot_eval_df['tot_train_score'],tot_eval_df['tot_test_score'],'o')
+#
+#tot_coef = np.polyfit(tot_model_predict,tot_actual,1)
+#tot_poly1d_fn = np.poly1d(tot_coef) 
+#
+#tot_ax2.plot(tot_model_predict,tot_actual, 'o')
+#
+## standard deviation
+#abs_variance_val = abs(tot_model_predict-tot_actual)
+#
+#print("The Point Standard Deviation is: {}".format(  statistics.stdev(abs_variance_val)  ) )
+#
+#
+#visualizer = ResidualsPlot(tot_rfm)
+#visualizer.fit(tot_X_train, tot_y_train)  # Fit the training data to the visualizer
+#visualizer.score(tot_X_test, tot_y_test)  # Evaluate the model on the test data
+#visualizer.show()                 # Finalize and render the figure
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#####more models
+#from sklearn.ensemble import MinMaxScaler
+#
+## Create the scaler object with a range of 0-1
+#scaler = MinMaxScaler(feature_range=(0, 1))
+## Fit on the training data
+#scaler.fit(X)
+## Transform both the training and testing data
+#X = scaler.transform(X)
+#X_test = scaler.transform(X_test)
+#
+#from sklearn.ensemble import GradientBoostingRegressor
+#
+## Create the model
+#gradient_boosted = GradientBoostingRegressor()
+#
+## Fit the model on the training data
+#gradient_boosted.fit(X, y)
+#
+## Make predictions on the test data
+#predictions = gradient_boosted.predict(X_test)
+#
+## Evaluate the model
+#mae = np.mean(abs(predictions - y_test))
+#
+#print('Gradient Boosted Performance on the test set: MAE = %0.4f' % mae)
