@@ -159,6 +159,9 @@ post-ETL notes
 
 """
 
+# build formulas
+def tot_r2(rfm,X_train, y_train):
+    return r2_score(y_train, rfm.predict(X_train))
 
 
 #pull saved data
@@ -383,7 +386,7 @@ dfm = dfm.drop(['Unnamed: 0'], axis = 1)
 dfm['Date'] = pd.to_datetime(dfm.Date, format='%Y-%m-%d') 
 
 #column metadata
-dfm_meta = pd.DataFrame(dfm.columns,columns=['Field'])  #######  STOPPED MODIFYYING HERE 2020-06-06 ######
+#dfm_meta = pd.DataFrame(dfm.columns,columns=['Field'])  # df meta not needed right now
 
 list_features = [ 'Country'
                  , 'Racing Age'
@@ -401,70 +404,87 @@ list_features = [ 'Country'
                    ]
 target = 'Time_Top3Pct'
 
-dfm_meta['Feature'] = dfm_meta.Field.isin(list_features)
-dfm_meta['Target'] = dfm_meta.Field==target
+#dfm_meta['Feature'] = dfm_meta.Field.isin(list_features)
+#dfm_meta['Target'] = dfm_meta.Field==target
 
-for time_col in time_cols:
-        dfm2 = dfm.loc[((dfm.Valid==True) & (dfm.Race_Leg==time_col)),:].copy()
-        dfm2 = dfm2.loc[:,list_features+[target]]
-        len(dfm2)
-                
-        #actually lets try replacing with -1 instead with the hopes that the model will understand this
-        dfm2=dfm2.fillna(-1)      
-        
-        list_nonnumeric_cols = dfm2.select_dtypes(include=['object','bool']).columns.values
-        # creating instance of labelencoder
-        dfm2=dfm2.apply(lambda x: LabelEncoder().fit_transform(x.astype(str)) )
-        
-        
-        X = dfm2.loc[:,list_features]
-        Y = dfm2.loc[:,[target]]
-        
-        
-        X_train, X_test, y_train, y_test = train_test_split(X, Y,test_size = .2)
-        
-        
-        ##############################################################
-        
-        #tried many models, RF was best
-        #The RF Train is 0.6203183331774287. Test is 0.5494430680915874. 
-        #The GBR Train is 0.5136991863658964. Test is 0.5093991369850603. 
-        #The LINEAR REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
-        #The RIDGE REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
-        #The SVM Train is 0.19502078187297178. Test is 0.19523202707195542. 
-        #The Lasso Train is 0.3310463993531328. Test is 0.331284370399007. 
-        
-        
-        #### Random Forest Regressor
-        
-        parameters = {'bootstrap': 'True'
-                          ,'min_samples_leaf': 10
-                          ,'n_estimators': 100
-                          ,'min_samples_split': 30
-                          ,'max_features': 'auto'
-                          ,'max_depth': None
-                          ,'oob_score': True
-                          ,'n_jobs': -1
-                          ,'criterion': 'mse'
-                          ,'min_impurity_decrease': .1
-                          } 
-        rf = RandomForestRegressor(**parameters)
-        rfm = rf.fit(X_train, y_train.values.ravel())
-        #    model_predict = rf.predict(X_test).astype(int)
-        #    actual = y_test.astype(int)
-        
-        #### rf model evaluation
-        rf_train_score = rf.score(X_train,y_train)
-        rf_test_score = rf.score(X_test,y_test)
-        
-        print("The {} RF Train is {}. Test is {}. ".format(time_col,rf_train_score,rf_test_score) )
-        
-        def tot_r2(rf,X_train, y_train):
-            return r2_score(y_train, rf.predict(X_train))
-        perm_imp_rfpimp = permutation_importances(rf, X_train, y_train, tot_r2)
 
-#plt.plot(rf.predict(X_train),y_train,'o' )
+dfm2 = dfm.loc[(dfm.Valid==True),:].copy()
+dfm2 = dfm2.loc[:,list_features+[target]]
+len(dfm2)
+        
+#actually lets try replacing with -1 instead with the hopes that the model will understand this
+dfm2=dfm2.fillna(-1)      
 
+# creating instance of labelencoder
+dfm2=dfm2.apply(lambda x: LabelEncoder().fit_transform(x.astype(str)) )
+
+
+X = dfm2.loc[:,list_features]
+Y = dfm2.loc[:,[target]]
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, Y,test_size = .2)
+
+
+##############################################################
+
+#tried many models, RF was best
+#The RF Train is 0.6203183331774287. Test is 0.5494430680915874. 
+#The GBR Train is 0.5136991863658964. Test is 0.5093991369850603. 
+#The LINEAR REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
+#The RIDGE REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
+#The SVM Train is 0.19502078187297178. Test is 0.19523202707195542. 
+#The Lasso Train is 0.3310463993531328. Test is 0.331284370399007. 
+
+
+#### Random Forest Regressor
+
+parameters = {'bootstrap': 'True'
+                  ,'min_samples_leaf': 10
+                  ,'n_estimators': 100
+                  ,'min_samples_split': 30
+                  ,'max_features': 'auto'
+                  ,'max_depth': None
+                  ,'oob_score': True
+                  ,'n_jobs': -1
+                  ,'criterion': 'mae'#'mse'
+                  ,'min_impurity_decrease': .1
+                  , 'random_state': 1
+                  } 
+rf = RandomForestRegressor(**parameters)
+rfm = rf.fit(X_train, y_train.values.ravel())
+#    model_predict = rf.predict(X_test).astype(int)
+#    actual = y_test.astype(int)
+
+#### rf model evaluation
+rfm_train_score = rfm.score(X_train,y_train)
+rfm_test_score = rfm.score(X_test,y_test)
+
+print("The RF Train is {}. Test is {}. ".format(rfm_train_score,rfm_test_score) )
+
+#moved to beginning of script
+#def tot_r2(rfm,X_train, y_train):
+#    return r2_score(y_train, rfm.predict(X_train))
+perm_imp_rfpimp = permutation_importances(rfm, X_train, y_train, tot_r2)
+
+plt.plot(rf.predict(X_train),y_train,'o' )
+
+
+def run_rf_model(df,trained_model,feature_var,target_var):
+    df = df.loc[(df['Valid']),feature_var+[target_var]].fillna(-1)    
+    df=df.apply(lambda x: LabelEncoder().fit_transform(x.astype(str)) )    
+    
+    X = df.loc[:,list_features]    
+    return trained_model.predict(X).astype(int)
+        
+#dfm.loc[(dfm.Valid==True),'Time_Top3Pct_Exp'] = 
+dfm.apply(run_rf_model, trained_model=rfm, feature_var=list_features, target_var=target, axis=1 )
+   
+
+#write table
+RACES_FILENAME_final2 = 'C:/Users/Read/Desktop/Code/Python/USAT/RACE_DATA_final2.csv'
+dfm.to_csv(RACES_FILENAME_final2, encoding='utf-8', index=True)
+ 
 
 ##############################################################
 
