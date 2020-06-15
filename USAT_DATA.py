@@ -41,109 +41,6 @@ from sklearn.preprocessing import LabelEncoder
 import statistics
 from yellowbrick.regressor import ResidualsPlot
 
-URL_races = 'http://usat.whitegoosetech.com/races'
-URL_races_2 = requests.get(URL_races).content
-soup_races = BeautifulSoup(URL_races_2)
-soup_races_tables = soup_races.find_all('table')
-race_rows = []
-for table in soup_races_tables:
-    for row in table.find_all('a'):
-        race_rows.append(row)
-
-race_links = ['http://usat.whitegoosetech.com'+i['href'] for i in race_rows]
-
-df_races = pd.DataFrame()
-
-
-#chromium driver
-driver = webdriver.Chrome()
-
-for URL_race in race_links:
-    #URL_race = 'http://usat.whitegoosetech.com/races/360'
-    
-    
-    driver.get(URL_race)
-    soup = BeautifulSoup(driver.page_source,"lxml")
-    
-    abbrevs = {'Junior Elite Male':'jem'
-                ,'Junior Elite Female':'jef'
-                ,'Youth Elite Male':'yem'
-                ,'Youth Elite Female':'yef' }
-    
-    
-    
-    
-    race = soup.h2.text
-    race_date_loc = soup.find("div", {"class": "center"}).text.split('\n')
-    race_date_loc = [i for i in race_date_loc if i != '']
-    race_date, race_loc = race_date_loc
-    
-    tab_names = soup.find_all("a", {"data-toggle": "tab"})
-    tab_names_clean = [s.text for s in tab_names]
-    
-    
-    for tab_name in tab_names_clean:
-        print(tab_name)
-        abbrev = abbrevs[tab_name]
-        
-        driver.find_element_by_link_text(tab_name).click()
-        results_num_list = driver.find_elements_by_tag_name('option')
-        results_num_list2 = [i.text for i in results_num_list]
-        results_num_list2 = list(map(int, [i for i in results_num_list2 if i != ''])) 
-        result_selection = str(max(results_num_list2))
-        
-        results_num_loc = driver.find_element_by_tag_name('select')
-    #    results_num_loc.get_attribute('outerHTML') del
-    
-    #trying another way
-        
-        select_test = driver.find_element_by_name('resultsTable-'+abbrev+'_length')
-        select = Select(select_test)  
-        select.select_by_value(result_selection)
-        
-    #    select = Select(results_num_loc) del
-    
-    #    select.select_by_value(result_selection) del    
-        
-        data = []
-        table = driver.find_element_by_id('resultsTable-'+abbrev)
-    #    table.get_attribute('outerHTML')
-        
-        table_head = table.find_element_by_tag_name('thead')
-        rows_head = table_head.find_elements_by_tag_name('th')
-        rows_head_clean = [s.text for s in rows_head]
-        
-        
-        table_body = table.find_element_by_tag_name('tbody')
-        
-        rows = table_body.find_elements_by_tag_name('tr')
-        for row in rows:
-            cols = row.find_elements_by_tag_name('td')
-            cols = [ele.text.strip() for ele in cols]
-            data.append(cols)
-        
-        df_data = pd.DataFrame(data, columns=rows_head_clean)
-        df_data['Race_Name'] = race
-        df_data['Division'] = tab_name
-        race_date_f = datetime.strptime(race_date , '%A, %B %d, %Y')
-        df_data['Date'] = race_date_f.strftime('%Y-%m-%d')
-        df_data['Location'] = race_loc
-    
-        print(df_data)
-    #    df_races.append(df_data)
-        df_races = pd.concat([df_races,df_data], axis=0, join='outer')
-        print(df_races)
-        #results = soup.find(id='ResultsContainer')
-        #job_elems = results.find_all('section', class_='card-content')
-
-df_races= df_races.reset_index(drop='True')
-
-driver.quit()
-
-#cached data run
-RACES_FILENAME = 'C:/Users/Read/Desktop/Code/Python/USAT/RACE_DATA.csv'
-df_races.to_csv(RACES_FILENAME, encoding='utf-8', index=True)
-
 
 """
 data notes
@@ -165,6 +62,7 @@ def tot_r2(rfm,X_train, y_train):
 
 
 #pull saved data
+RACES_FILENAME = 'C:/Users/Read/Desktop/Code/Python/USAT/RACE_DATA.csv'
 df_races2 = pd.read_csv(RACES_FILENAME)
 df_races2 = df_races2.drop(['Unnamed: 0'], axis = 1) 
 
@@ -328,7 +226,12 @@ df['International_Racer_Flag'] = (df.Date_First_NonUSA_Race<=df.Date)
 df.loc[(df.Valid==True),'Time_PctPri1'] = df.loc[(df.Valid==True),:].sort_values(by=['Date'], ascending=True).groupby(['Name','Race_Leg'])['Time_Top3Pct'].shift(1)
 df.loc[(df.Valid==True),'Time_PctPri2'] = df.loc[(df.Valid==True),:].sort_values(by=['Date'], ascending=True).groupby(['Name','Race_Leg'])['Time_Top3Pct'].shift(2)
 df.loc[(df.Valid==True),'Time_PctPri3'] = df.loc[(df.Valid==True),:].sort_values(by=['Date'], ascending=True).groupby(['Name','Race_Leg'])['Time_Top3Pct'].shift(3)
-df['Time_PctPriAvg3'] = (df['Time_PctPri1'].fillna(0) + df['Time_PctPri2'].fillna(0) + df['Time_PctPri3'].fillna(0)) /  (df['Time_PctPri1'].notna()*1+df['Time_PctPri2'].notna()*1+df['Time_PctPri3'].notna()*1)  ## figure how to make these ints sum ###
+df.loc[(df.Valid==True),'Time_PctPri4'] = df.loc[(df.Valid==True),:].sort_values(by=['Date'], ascending=True).groupby(['Name','Race_Leg'])['Time_Top3Pct'].shift(4)
+df.loc[(df.Valid==True),'Time_PctPri5'] = df.loc[(df.Valid==True),:].sort_values(by=['Date'], ascending=True).groupby(['Name','Race_Leg'])['Time_Top3Pct'].shift(5)
+df['Time_PctPriAvg2'] = (df['Time_PctPri1'].fillna(0) + df['Time_PctPri2'].fillna(0) ) /  (df['Time_PctPri1'].notna()*1+df['Time_PctPri2'].notna()*1) 
+df['Time_PctPriAvg3'] = (df['Time_PctPri1'].fillna(0) + df['Time_PctPri2'].fillna(0) + df['Time_PctPri3'].fillna(0)) /  (df['Time_PctPri1'].notna()*1+df['Time_PctPri2'].notna()*1+df['Time_PctPri3'].notna()*1) 
+df['Time_PctPriAvg5'] = (df['Time_PctPri1'].fillna(0) + df['Time_PctPri2'].fillna(0) + df['Time_PctPri3'].fillna(0) + df['Time_PctPri4'].fillna(0) + df['Time_PctPri5'].fillna(0)) /  (df['Time_PctPri1'].notna()*1+df['Time_PctPri2'].notna()*1+df['Time_PctPri3'].notna()*1+df['Time_PctPri4'].notna()*1+df['Time_PctPri5'].notna()*1) 
+df['Time_PctPriAMax5'] = df.loc[:,['Time_PctPri1','Time_PctPri2','Time_PctPri3','Time_PctPri4','Time_PctPri5']].max(axis=1, skipna=False)
 df['Time_PctPriAMax3'] = df.loc[:,['Time_PctPri1','Time_PctPri2','Time_PctPri3']].max(axis=1, skipna=False)
 df['Time_PctPriAMin3'] = df.loc[:,['Time_PctPri1','Time_PctPri2','Time_PctPri3']].min(axis=1, skipna=False)
 
@@ -356,6 +259,13 @@ df['HAS_TEAM'] = df.Team.notnull()
 df.loc[(df.Valid==True),'Time_PctPriAvg3_Rank'] = df.loc[(df.Valid==True),:].groupby(list_gb_race_leg)['Time_PctPriAvg3'].rank(method='min')
 
 gb_top3priavg = df.loc[(df.Time_PctPriAvg3_Rank<=3),:].groupby(list_gb_race_leg)['Time_PctPriAvg3'].mean().reset_index()
+df = df.merge(gb_top3priavg,how='left',on = list_gb_race_leg,suffixes=['','_Top3'])
+
+
+# best 3 max 5 of 5 recent races, avg together as a means for estimating how "good" top 3 will be this race
+df.loc[(df.Valid==True),'Time_PctPriAMax5_Rank'] = df.loc[(df.Valid==True),:].groupby(list_gb_race_leg)['Time_PctPriAMax5'].rank(method='min')
+
+gb_top3priavg = df.loc[(df.Time_PctPriAMax5_Rank<=3),:].groupby(list_gb_race_leg)['Time_PctPriAMax5'].mean().reset_index()
 df = df.merge(gb_top3priavg,how='left',on = list_gb_race_leg,suffixes=['','_Top3'])
 
 #write table
@@ -388,98 +298,109 @@ dfm['Date'] = pd.to_datetime(dfm.Date, format='%Y-%m-%d')
 #column metadata
 #dfm_meta = pd.DataFrame(dfm.columns,columns=['Field'])  # df meta not needed right now
 
-list_features = [ 'Country'
-                 , 'Racing Age'
+list_features = [ 
+                 'Country',
+                  'Racing Age'
                  , 'Division'
                    , 'Race_Leg'
                    , 'N_Race_In_Data'
                    , 'USA_Race'
                    , 'International_Racer_Flag'
+                   , 'Time_PctPriAvg2'
                    , 'Time_PctPriAvg3'
+                   , 'Time_PctPriAvg5'
                    , 'Time_PctPri1'
                    , 'Time_PctPriAMax3'
+                   , 'Time_PctPriAMax5'
                    , 'Time_PctPriAMin3'
                    , 'HAS_TEAM'
                    , 'Time_PctPriAvg3_Top3'
+                   , 'Time_PctPriAMax5_Top3'
                    ]
 target = 'Time_Top3Pct'
 
 #dfm_meta['Feature'] = dfm_meta.Field.isin(list_features)
 #dfm_meta['Target'] = dfm_meta.Field==target
 
-
-dfm2 = dfm.loc[(dfm.Valid==True),:].copy()
-dfm2 = dfm2.loc[:,list_features+[target]]
-len(dfm2)
+for time_col in time_cols:
+        dfm2 = dfm.loc[(dfm.Valid==True) & (dfm.Race_Leg==time_col),:].copy()
+        dfm2 = dfm2.loc[:,list_features+[target]]
+#        len(dfm2)
+                
+        #actually lets try replacing with -1 instead with the hopes that the model will understand this
+        dfm2=dfm2.fillna(-1)      
         
-#actually lets try replacing with -1 instead with the hopes that the model will understand this
-dfm2=dfm2.fillna(-1)      
-
-# creating instance of labelencoder
-dfm2=dfm2.apply(lambda x: LabelEncoder().fit_transform(x.astype(str)) )
-
-
-X = dfm2.loc[:,list_features]
-Y = dfm2.loc[:,[target]]
-
-
-X_train, X_test, y_train, y_test = train_test_split(X, Y,test_size = .2)
-
-
-##############################################################
-
-#tried many models, RF was best
-#The RF Train is 0.6203183331774287. Test is 0.5494430680915874. 
-#The GBR Train is 0.5136991863658964. Test is 0.5093991369850603. 
-#The LINEAR REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
-#The RIDGE REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
-#The SVM Train is 0.19502078187297178. Test is 0.19523202707195542. 
-#The Lasso Train is 0.3310463993531328. Test is 0.331284370399007. 
-
-
-#### Random Forest Regressor
-
-parameters = {'bootstrap': 'True'
-                  ,'min_samples_leaf': 10
-                  ,'n_estimators': 100
-                  ,'min_samples_split': 30
-                  ,'max_features': 'auto'
-                  ,'max_depth': None
-                  ,'oob_score': True
-                  ,'n_jobs': -1
-                  ,'criterion': 'mae'#'mse'
-                  ,'min_impurity_decrease': .1
-                  , 'random_state': 1
-                  } 
-rf = RandomForestRegressor(**parameters)
-rfm = rf.fit(X_train, y_train.values.ravel())
-#    model_predict = rf.predict(X_test).astype(int)
-#    actual = y_test.astype(int)
-
-#### rf model evaluation
-rfm_train_score = rfm.score(X_train,y_train)
-rfm_test_score = rfm.score(X_test,y_test)
-
-print("The RF Train is {}. Test is {}. ".format(rfm_train_score,rfm_test_score) )
-
-#moved to beginning of script
-#def tot_r2(rfm,X_train, y_train):
-#    return r2_score(y_train, rfm.predict(X_train))
-perm_imp_rfpimp = permutation_importances(rfm, X_train, y_train, tot_r2)
-
-plt.plot(rf.predict(X_train),y_train,'o' )
-
-
-def run_rf_model(df,trained_model,feature_var,target_var):
-    df = df.loc[(df['Valid']),feature_var+[target_var]].fillna(-1)    
-    df=df.apply(lambda x: LabelEncoder().fit_transform(x.astype(str)) )    
-    
-    X = df.loc[:,list_features]    
-    return trained_model.predict(X).astype(int)
+        #figure out which columns we need to encode
+        obj_cols = dfm2.select_dtypes(include=['object','bool']).columns.values
+        # creating instance of labelencoder
+        dfm2[obj_cols]=dfm2[obj_cols].apply(lambda x: LabelEncoder().fit_transform(x.astype(str)) )
         
-#dfm.loc[(dfm.Valid==True),'Time_Top3Pct_Exp'] = 
-dfm.apply(run_rf_model, trained_model=rfm, feature_var=list_features, target_var=target, axis=1 )
-   
+        
+        X = dfm2.loc[:,list_features]
+        Y = dfm2.loc[:,[target]]
+        
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, Y,test_size = .2)
+        
+        
+        ##############################################################
+        
+        #tried many models, RF was best
+        #The RF Train is 0.6203183331774287. Test is 0.5494430680915874. 
+        #The GBR Train is 0.5136991863658964. Test is 0.5093991369850603. 
+        #The LINEAR REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
+        #The RIDGE REGRESSION Train is 0.33104664775927123. Test is 0.3312855631191846. 
+        #The SVM Train is 0.19502078187297178. Test is 0.19523202707195542. 
+        #The Lasso Train is 0.3310463993531328. Test is 0.331284370399007. 
+        
+        
+        #### Random Forest Regressor
+        
+        parameters = {'bootstrap': True
+                          ,'min_samples_leaf': 6
+                          ,'n_estimators': 50
+                          ,'min_samples_split': 15
+                          ,'max_features': 'auto'
+                          ,'max_depth': 50
+                          ,'oob_score': True
+                          ,'n_jobs': -1
+                          ,'criterion': 'mse'
+        #                  ,'min_impurity_decrease': .001 #not helping
+                          , 'random_state': 1
+                          } 
+        rf = RandomForestRegressor(**parameters)
+        rfm = rf.fit(X_train, y_train.values.ravel())
+        #    model_predict = rf.predict(X_test).astype(int)
+        #    actual = y_test.astype(int)
+        
+        #### rf model evaluation
+        rfm_train_score = rfm.score(X_train,y_train)
+        rfm_test_score = rfm.score(X_test,y_test)
+        
+        print("The RF Train is {}. Test is {}. ".format(rfm_train_score,rfm_test_score) )
+        
+        #moved to beginning of script
+        #def tot_r2(rfm,X_train, y_train):
+        #    return r2_score(y_train, rfm.predict(X_train))
+        #perm_imp_rfpimp = permutation_importances(rfm, X_train, y_train, tot_r2)
+        
+        #plt.plot(rf.predict(X_train),y_train,'o' )
+        
+        
+        def prep_model_data(df_var,feature_var,target_var):
+            df_var = df_var.loc[:,feature_var+[target_var]].fillna(-1)    
+            
+            obj_cols2 = df_var.select_dtypes(include=['object','bool']).columns.values
+            if len(obj_cols2) != 0:
+                df_var[obj_cols2]=df_var[obj_cols2].apply(lambda x: LabelEncoder().fit_transform(x.astype(str)) )    
+            else:
+                pass
+            
+            return df_var.loc[:,list_features]    
+        
+        dfm3 = prep_model_data(df_var=dfm.loc[(dfm.Valid==True) & (dfm.Race_Leg==time_col),:], feature_var=list_features, target_var=target)
+        
+        dfm.loc[(dfm.Valid) & (dfm.Race_Leg==time_col),'Time_Top3Pct_Pred'] = rfm.predict(dfm3)
 
 #write table
 RACES_FILENAME_final2 = 'C:/Users/Read/Desktop/Code/Python/USAT/RACE_DATA_final2.csv'
