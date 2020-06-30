@@ -72,11 +72,11 @@ all_cols = df_races2.columns.tolist()
 
 # define race legs and aggregate legs
 dict_legs = { 
-    'Swim' : { 'Legs':['Swim'] , 'PCT_FR_MED_HI': 2 , 'PCT_FR_MED_LO': -.3,'Time_col':True } 
+    'Swim' : { 'Legs':['Swim'] , 'PCT_FR_MED_HI': 1 , 'PCT_FR_MED_LO': -.3,'Time_col':True } 
     ,'T1': { 'Legs':['T1'] , 'PCT_FR_MED_HI': 4 , 'PCT_FR_MED_LO': -.3, 'Time_col':True} 
-    ,'Bike': { 'Legs':['Bike'] , 'PCT_FR_MED_HI': 2, 'PCT_FR_MED_LO': -.3,'Time_col':True } 
+    ,'Bike': { 'Legs':['Bike'] , 'PCT_FR_MED_HI': 1, 'PCT_FR_MED_LO': -.3,'Time_col':True } 
     ,'T2': { 'Legs':['T2'] , 'PCT_FR_MED_HI': 4, 'PCT_FR_MED_LO': -.3, 'Time_col':True } 
-    ,'Run': { 'Legs':['Run'] , 'PCT_FR_MED_HI': 2, 'PCT_FR_MED_LO': -.3, 'Time_col':True } 
+    ,'Run': { 'Legs':['Run'] , 'PCT_FR_MED_HI': 1, 'PCT_FR_MED_LO': -.3, 'Time_col':True } 
     ,'Finish': { 'Legs':['Swim','T1','Bike','T2','Run']  , 'PCT_FR_MED_HI': 2,'PCT_FR_MED_LO': -.3,'Time_col':True } 
     ,'Finish_Calc': { 'Legs':['Swim','T1','Bike','T2','Run']  , 'PCT_FR_MED_HI': 2,'PCT_FR_MED_LO': -.3,'Time_col':False } 
     ,'Bike_Out': { 'Legs':['Swim','T1'] , 'PCT_FR_MED_HI': 2,'PCT_FR_MED_LO': -.3, 'Time_col':False } 
@@ -142,8 +142,13 @@ df['Var_From_20_PCTLE_Pct'] = df.Time/df.Quantile_20-1
 df['Var_From_80_PCTLE_Pct'] = df.Time/df.Quantile_80-1
 df['PCT_FR_MED_HI'] = df.Race_Leg.apply(lambda x: dict_legs.get(x)['PCT_FR_MED_HI'])
 df['PCT_FR_MED_LO'] = df.Race_Leg.apply(lambda x: dict_legs.get(x)['PCT_FR_MED_LO'])
-df['Valid'] = (df.Var_From_80_PCTLE_Pct<df['PCT_FR_MED_HI']) & (df.Var_From_20_PCTLE_Pct>df['PCT_FR_MED_LO'] ) & (df.Time<12000)
 
+#Special conditions to define what is a valid race result, as additional data is added, more manual controls may be required
+df['Valid'] = (df.Var_From_80_PCTLE_Pct<df['PCT_FR_MED_HI']) & (df.Var_From_20_PCTLE_Pct>df['PCT_FR_MED_LO'] ) & (df.Time<12000)
+df.loc[(df.Race_Leg=='Bike')&(df.Race_Name == 'Monroe Junior Elite Cup')&(df.Date == '2017-06-24'),'Valid'] = (df.Valid)&(df.Race_Leg=='Bike')&(df.Race_Name == 'Monroe Junior Elite Cup')&(df.Date == '2017-06-24') & (df.Time>180)  # weird low bike times in Monroe 2017
+df.loc[(df.Race_Leg=='Run')&(df.Race_Name == 'Pleasant Prairie Junior Elite Cup')&(df.Date == '2016-06-05'),'Valid'] = (df.Valid)&(df.Race_Leg=='Run')&(df.Race_Name == 'Pleasant Prairie Junior Elite Cup')&(df.Date == '2016-06-05') & (df.Time>120) # weird low bike times in Pleasant Prairie 2016
+df.loc[(df.Race_Leg=='T1')&(df.Race_Name == 'Richmond Junior Elite Cup')&(df.Date == '2015-05-03'),'Valid'] = (df.Valid)&(df.Race_Leg=='T1')&(df.Race_Name == 'Richmond Junior Elite Cup')&(df.Date == '2015-05-03') & (df.Time<240) # 
+df.loc[(df.Race_Leg=='T2')&(df.Race_Name == 'Monroe Junior Elite Cup')&(df.Date == '2017-06-24'),'Valid'] = (df.Valid)&(df.Race_Leg=='T2')&(df.Race_Name == 'Monroe Junior Elite Cup')&(df.Date == '2017-06-24') & (df.Time<240) # 
 
 
 df_aggs = df[0:0] #empty data frame shell for concat union
@@ -276,7 +281,7 @@ df.to_csv(RACES_FILENAME_final2, encoding='utf-8', index=True)
 #df_races2 = df_races2.drop(['Unnamed: 0'], axis = 1) 
 
 
-
+df_test = df.loc[(df.Race_Name == 'Richmond Junior Elite Cup')&(df.Race_Leg=='T1') & (df.Date == '2015-05-03')]
 
 
 
@@ -322,8 +327,10 @@ target = 'Time_Top3Pct'
 #dfm_meta['Feature'] = dfm_meta.Field.isin(list_features)
 #dfm_meta['Target'] = dfm_meta.Field==target
 
-for time_col in time_cols:
-        dfm2 = dfm.loc[(dfm.Valid==True) & (dfm.Race_Leg==time_col),:].copy()
+model_cols = dfm.Race_Leg.unique().tolist()
+
+for time_col in model_cols:
+        dfm2 = dfm.loc[(dfm.Valid==True) & (dfm.Race_Leg==time_col) & (dfm.MIN_DATE_IN_DATA.str.slice(stop=4)!='2015'),:].copy()
         dfm2 = dfm2.loc[:,list_features+[target]]
 #        len(dfm2)
                 
@@ -357,11 +364,11 @@ for time_col in time_cols:
         #### Random Forest Regressor
         
         parameters = {'bootstrap': True
-                          ,'min_samples_leaf': 6
-                          ,'n_estimators': 50
-                          ,'min_samples_split': 15
+                          ,'min_samples_leaf': 5
+                          ,'n_estimators': 100
+                          ,'min_samples_split': 30
                           ,'max_features': 'auto'
-                          ,'max_depth': 50
+                          ,'max_depth': 30
                           ,'oob_score': True
                           ,'n_jobs': -1
                           ,'criterion': 'mse'
@@ -377,7 +384,7 @@ for time_col in time_cols:
         rfm_train_score = rfm.score(X_train,y_train)
         rfm_test_score = rfm.score(X_test,y_test)
         
-        print("The RF Train is {}. Test is {}. ".format(rfm_train_score,rfm_test_score) )
+        print("The {} RF Train is {}. Test is {}. ".format(time_col,rfm_train_score,rfm_test_score) )
         
         #moved to beginning of script
         #def tot_r2(rfm,X_train, y_train):
