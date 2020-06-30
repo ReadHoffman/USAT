@@ -9,3 +9,10 @@ General Flow of analysis (Python+Tableau):
 5) A Decision Tree Regressor Model is trained on inputs and the model expectations are added to the data
 6) Tableau viz illustrates trends by athlete, team, age, leg of race, and event.
 
+
+
+What questions does this analysis answer?
+1) How fast does an athlete need to swim, bike, run to be likely to achieve X final place?
+2) How much is an athletes performance (overall as well as in each race leg) better or worse than expected given their history and other relevant attributes about the race and their fellow competitors?
+3) Which teams consistently have athletes perform/develop above or below expectation?
+4) Which athletes developed the most versus expectations?
