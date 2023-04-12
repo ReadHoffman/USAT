@@ -20,3 +20,5 @@ What questions does this analysis answer?
   -https://public.tableau.com/views/USATv1_0/TeamvsPredicted?:language=en-US&:display_count=n&:origin=viz_share_link
 4) Which athletes developed the most versus expectations?
   -https://public.tableau.com/views/USATv1_0/VartoPredAthlete?:language=en-US&:display_count=n&:origin=viz_share_link
+
+Raw data (available as read only) can be found here: https://drive.google.com/drive/folders/1eQWarvGAZFzJT9XcK8jvMEuguxMcKLN0?usp=sharing
