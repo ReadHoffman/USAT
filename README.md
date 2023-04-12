@@ -13,6 +13,10 @@ General Flow of analysis (Python+Tableau):
 
 What questions does this analysis answer?
 1) How fast does an athlete need to swim, bike, run to be likely to achieve X final place?
+  -https://public.tableau.com/views/USATv1_0/SBRneededbyplacegraph?:language=en-US&:display_count=n&:origin=viz_share_link
 2) How much is an athletes performance (overall as well as in each race leg) better or worse than expected given their history and other relevant attributes about the race and their fellow competitors?
+  -https://public.tableau.com/views/USATv1_0/AthleteVsPredicted?:language=en-US&:display_count=n&:origin=viz_share_link
 3) Which teams consistently have athletes perform/develop above or below expectation?
+  -https://public.tableau.com/views/USATv1_0/TeamvsPredicted?:language=en-US&:display_count=n&:origin=viz_share_link
 4) Which athletes developed the most versus expectations?
+  -https://public.tableau.com/views/USATv1_0/VartoPredAthlete?:language=en-US&:display_count=n&:origin=viz_share_link
